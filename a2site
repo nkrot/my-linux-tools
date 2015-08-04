@@ -1,0 +1,296 @@
+#!/bin/bash
+
+# # #
+# Debian-like a2ensite, a2dissite
+#
+# 
+# EXAMPLE of output for --list
+# example.org        AVAILABLE(link:SUSPICIOUS) ENABLED(link.to_correct_file:OK)
+# dummy.com          AVAILABLE(file:OK)         ENABLED(link.to_another_file:ERROR)
+# stupid.org         AVAILABLE(file:OK)         ENABLED(link.to_correct_file:OK)
+# interesting.org    AVAILABLE(file:OK)         DISABLED
+#
+# TODO:
+# 1. recognize paths if given as command line args?
+# 2. recognize .conf suffix and handle it automatically if also given
+#    on the command line
+
+
+DIR_HTTPD=/etc/httpd
+DIR_AVAILABLE=$DIR_HTTPD/sites-available
+DIR_ENABLED=$DIR_HTTPD/sites-enabled
+
+function usage() {
+    cat <<EOF
+
+  Manage (enable, disable, etc) sites available on the system.
+USAGE: `basename $0` [OPTIONS] TASK site1 [site2...]
+OPTIONS:
+   -h --help      display this message and exit
+TASK (only one is possible at a time, the last one wins):
+   -e --enable    enable specified site(s)
+   -d --disable   disable specified site(s)
+   -l --list      list if specified sites are enabled or disabled.
+                  If no sites are given, info on all available sites
+                  is displayed.
+
+Alternatively, use shorthands:
+  a2ensite is equivalent to `basename $0` --enable ...
+  a2dissite is equivalent to `basename $0` --disable ...
+
+EXAMPLES:
+  To enable a site in $DIR_AVAILABLE/example.com.conf,
+  issue any of the following commands:
+    > a2ensite example.com
+    > a2site --enable example.com
+  As a result a link will be created in $DIR_ENABLED:
+  $DIR_AVAILABLE/example.com.conf -link-> $DIR_AVAILABLE/example.com.conf
+  If such a link already exists, it will be removed and a new one will
+  be created. If instead of a link a real file is found, an error will
+  be reported and the existing file will be retained.
+
+  To disable the sites example.com and mydomain.org issue any of
+  the following commands:
+    > a2dissite example.com mydomain.org
+    > a2site --disable example.com mydomain.org
+  Trying to disable a site that is not enabled is not an error.
+
+  To list sites that are available on the system with info whether 
+  they are enabled or disabled, use any of the following commands:
+    > a2site --list
+    > a2ensite --list
+    > a2dissite --list
+  Note that if the sites is listed as enabled it does not mean that
+  the web server actually serves it.
+
+FURTHER STEPS:
+  Once a site was enabled or disabled, new configuration should be
+  applied to the web server.
+
+  Step 1. Test that the new configuration is syntactically correct
+  by issuing the following command (RHEL7):
+    > apachectl configtest
+  
+  Step 2. Reload or restart the web server with either command
+  (read more in 'apachectl -h'):
+    > apachectl graceful
+    > apachectl reload
+    > apachectl restart
+
+  Step 3: Check current configuration of the running web server:
+    > apachectl -S
+
+Note: this is self-backed script. At the time of writing RHEL7 does
+      not provide Debian-style a2{en,dis}site scripts.
+
+Send your comments, wishes and bugreports to talpus@gmail.com
+
+TODO:
+1. enable|disable all if no site names are given (as with --list)?
+
+EOF
+}
+
+######################################################################
+
+task=
+
+if [ $# -eq 0 ]; then
+    usage
+    exit 0
+fi
+
+while [ $# -ne 0 ]; do
+    case $1 in
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        -e|--enable)
+            task=enable
+            ;;
+        -d|--disable)
+            task=disable
+            ;;
+        -l|--list)
+            task=list
+            ;;
+        -?|--*)
+            echo "ERROR: Unrecognized option $1" >&2
+            exit 1
+            ;;
+        *)
+            break
+            ;;
+    esac
+    shift
+done
+
+# sanity check
+if [ $# -eq 0 ] && [ $task = "enable" -o $task = "disable" ]; then
+    echo "ERROR: Not enough command line arguments. Try --help" >&2
+    exit 1
+fi
+
+######################################################################
+# FUNCTIONS
+
+failures=
+
+function check_dir() {
+    dname=$1
+    if [ -d "$dname" ]; then
+        return 0
+    else
+        echo "Directory not found: $dname" >&2
+        return 1
+    fi
+}
+
+function conf_files_from() {
+    # -L will find symbolic links that point to files (-type f)
+    find -L $@ -maxdepth 1 -type f -name "*.conf" -exec basename {} .conf \; |
+    sort -u
+}
+
+function list_sites() {
+    sites=$@
+
+    if [ -z "$sites" ]; then
+        sites=`conf_files_from $DIR_AVAILABLE $DIR_ENABLED`
+    fi
+
+    echo "Listing sites in $DIR_AVAILABLE and $DIR_ENABLED"
+
+    for site in $sites; do
+        # note -s: will not resolve symbolic links
+        av_file=`realpath -s $DIR_AVAILABLE/$site.conf`
+        en_file=`realpath -s $DIR_ENABLED/$site.conf`
+
+#        echo ""
+#        echo "AV FILE: ${av_file}"
+#        echo "EN FILE: ${en_file}"
+
+        av_status="NON-AVAILABLE"
+        en_status="DISABLED"
+
+        if [ -f "$av_file" ]; then
+            av_status="AVAILABLE"
+            if [ -L "$av_file" ]; then
+                av_status+="(link:SUSPICIOUS)"
+            else
+                av_status+="(file:OK)"
+            fi
+        fi
+
+        if [ -f "$en_file" ]; then
+            en_status="ENABLED"
+            if [ -L "$en_file" ]; then
+                en_status+="(link"
+                if [ "$av_file" -ef "$en_file" ]; then
+                    en_status+=".to_correct_file:OK)"
+                else
+                    en_status+=".to_another_file:ERROR)"
+                fi
+            else
+                en_status+="(file:ERROR)"
+            fi
+        fi
+
+        printf "%-30s\t%-25s\t%s\n" "$site" "$av_status" "$en_status"
+    done
+}
+
+function enable_sites() {
+    sites=$@
+
+    for site in $sites; do
+        av_file=`realpath -s $DIR_AVAILABLE/$site.conf`
+        en_file=`realpath -s $DIR_ENABLED/$site.conf`
+
+        echo -n "Enabling site $site ($av_file)"
+
+        en_file_removable=0
+        if [ -f "$en_file" ]; then
+            if [ -L "$en_file" ]; then
+                # en_file is a link and it is safe to remove it
+                en_file_removable=1
+            else
+                # en_file is a file and should not be affected
+                en_file_removable=-1
+            fi
+        fi
+
+        if [ ! -f "$av_file" ]; then
+            echo " -- FAILED. Conf file does not exist in sites-available."
+            failures+=" $site"
+
+        elif [ $en_file_removable -eq -1 ]; then
+            echo " -- FAILED. Will not override existing target file."
+            failures+=" $site"
+
+        else
+            addmsg=
+            if [ $en_file_removable -eq 1 ]; then
+                addmsg=" (in lieu of an old conf file)"
+                \rm "$en_file"
+            fi
+            ln -s "$av_file" "$en_file"
+            echo " -- OK$addmsg"
+        fi
+    done
+
+    if [ -n "$failures" ]; then
+        return 11
+    else
+        return 0
+    fi
+}
+
+function disable_sites() {
+    sites=$@
+
+    for site in $sites; do
+        en_file=`realpath -s $DIR_ENABLED/$site.conf`
+
+        echo -n "Disabling $site ($en_file)"
+
+        if [ -L "$en_file" ]; then
+            echo " -- OK"
+            \rm "$en_file"
+        elif [ -f "$en_file" ]; then
+            echo " -- FAILED. Expecting symbolic link but found file."
+            failures+="$site "
+        else
+            echo " -- WARNING. Either not enabled or does not exist."
+        fi
+    done
+
+    if [ -n "$failures" ]; then
+        return 12
+    else
+        return 0
+    fi
+}
+
+######################################################################
+# MAIN ROUTINE
+
+check_dir "$DIR_AVAILABLE" || exit 2
+check_dir "$DIR_ENABLED"   || exit 3
+
+case $task in
+    list)
+        list_sites $@
+        ;;
+    enable)
+        enable_sites $@
+        ;;
+    disable)
+        disable_sites $@ || exit $?
+        ;;
+    *)
+        echo "Task $task not implemented" >&2
+        exit 1
+esac
+
