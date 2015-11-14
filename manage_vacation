@@ -1,0 +1,250 @@
+#!/usr/bin/env ruby
+
+# # #
+# gems used:
+#  https://github.com/ktheory/maildir
+#  https://github.com/mikel/mail
+#
+# Include in the help message:
+#  - works with Maildir format only
+#
+# 1. avoid processing autoreplies :)
+# 2. can Ruby talk to ManageSieve?
+#    there are ruby implementations of ManageSieve but would be good
+#    not to use them
+#
+
+require 'maildir'
+require 'mail'
+
+@mailboxes_dir = "/home/mkrot/projects/my-linux-tools/tmp/"
+
+######################################################################
+
+class Vacation
+  attr_reader :starts_at, :ends_at
+  attr_accessor :requested_at
+  attr_reader :status, :closed
+  attr_accessor :canceled
+  attr_accessor :account_name, :account_email
+  attr_accessor :email_file
+
+  # activation_time: time when the message was received
+  # employee_email
+
+  # TODO: test if works with html
+  def self.parse text
+    puts "=== parsing text to find Vacation ==="
+    obj = self.new
+    text.split(/\n/).each do |line|
+      line.chomp!
+      if line =~ /=end/
+        obj.closed = true
+        break
+      elsif line =~ /^cancel/
+        obj.canceled = true
+      elsif line =~ /^first (?:day|date):(.+)/
+        obj.starts_at = $1
+      elsif line =~ /^last (?:day|date):(.+)/
+        obj.ends_at = $1
+      elsif line =~ /^message:(.*)/
+        obj.message = $1.strip
+      elsif obj.setting_message?
+        obj.message << "\n" << line
+      end
+    end
+
+    fields = [:starts_at, :ends_at, :canceled]
+    if fields.all?{ |f| obj.send(f).nil? }
+      obj = nil
+    end
+    obj
+  end
+
+  def initialize
+    @closed = false
+    @getting_message = false
+    @account_name = nil
+  end
+
+  def starts_at= val
+    @setting_message = false
+    @starts_at = val.is_a?(Date) ? val : Date.parse(val)
+  end
+
+  def ends_at= val
+    @setting_message = false
+    @ends_at = val.is_a?(Date) ? val : Date.parse(val)
+  end
+
+  def message
+    @message || message_default
+  end
+
+  def message_default
+    'I am on vacation. Hopefully will manage to get back from Egypt.'
+  end
+
+  def message= val
+    @setting_message = true
+    @message = val
+  end
+
+  def setting_message?
+    @setting_message
+  end
+
+  def closed= v
+    @closed = v
+    @setting_message = false if @closed
+  end
+
+  def canceled?
+    canceled
+  end
+
+  def to_s
+    out = []
+    out << "account: #{account_name}"
+    out << "email: #{account_email}"
+    if canceled?
+      out << "vacation: canceled"
+    else
+      out << "from: #{starts_at}"
+      out << "till: #{ends_at}"
+      out << "message:\n#{message}\nend_of_message"
+      out << "*requested at: #{requested_at}"
+      out << "*email path: #{email_file.path}"
+    end
+    out.join("\n")
+  end
+end
+
+######################################################################
+
+def senders_in_our_domain msg
+  # as per RFC, the From field can contain several addresses
+  senders = msg.from.select do |addr|
+    username, domain, other = addr.split '@'
+    @our_domains.include?(domain.downcase)
+  end
+  senders
+end
+
+def mail_to_me? msg
+  rcpt_addresses = [:to, :cc].map do |meth|
+    msg.send(meth)
+  end.flatten.compact.map(&:downcase)
+  !(@my_email_addresses - rcpt_addresses).empty?
+end
+
+def path_to_maildir account
+  File.join @mailboxes_dir, account, "Maildir"
+end
+
+# resolve to the same account synonyms: kiss/tibor
+def get_account_name email_addr
+  account, other = email_addr.split '@'
+  account.downcase! # Dovecot also does the same
+
+  account
+end
+
+######################################################################
+
+service = "vacation"
+service_maildir_path = path_to_maildir service
+
+@our_domains = ["linguistics.rub.de", "linguistics.ruhr-uni-bochum.de"]
+@my_email_addresses = @our_domains.map { |dmn| "#{service}@#{dmn}" }
+
+unless File.directory? service_maildir_path
+  $stderr.puts "ERROR: Maildir not found: #{service_maildir_path}"
+  exit 1
+end
+
+vacations = []
+
+service_maildir = Maildir.new service_maildir_path, false
+
+[:cur, :new].each do |loc|
+  service_maildir.list(loc).each do |mailfile|
+    puts "\n\n=== Processing Email ==="
+    puts mailfile.path
+    msg = Mail.read(mailfile.path)
+
+    unless mail_to_me? msg
+      puts "Not a mail to me"
+      next
+    end
+
+    senders = senders_in_our_domain(msg)
+
+    if senders.empty?
+      puts "Sender not in our domain: #{msg.from}"
+      next
+    end
+
+    #puts "== parsing the mail =="
+    if msg.multipart?
+      msg_body = msg.text_part || msg.html_part
+    else
+      msg_body = msg.body
+    end
+
+    vac = Vacation.parse msg_body.decoded
+
+    if vac
+      # TODO: in theory, there can be several addresses in the From
+      # field and consequently in the senders array. But we ignore
+      # this situation for the moment.
+
+      # Keep the original sender address to be able to send a notice
+      # back to the user.
+      vac.account_email = senders.first
+
+      # Store account name that will be used for:
+      # - computing the path to the mailbox
+      # - identifying vacation emails belonging to the same user
+      vac.account_name = get_account_name(vac.account_email)
+
+      # Set date on which request date was received.
+      # Necessary for finding out the vacation request that is most
+      # up-to-date and needs to be reacted.
+      vac.requested_at = msg.date
+
+      # Attach original email file, we may want to manipulate it
+      vac.email_file = mailfile
+    end
+
+    puts "=== Vacation object ==="
+    puts vac.inspect
+    puts vac.to_s
+
+  end
+end
+
+puts vacations.length
+
+unless vacations.empty?
+  # TODO: sort vacations by user
+  #       determine the most up to date Vacation request
+  #       install or remove sieve script
+  #       send notification to the user (and a copy to postmaster?)
+  #         installed succesfully success
+  #         failed + help message
+  # TODO: delete emails after they have been processed
+  # if there are several emails from a sender, delete all of them
+
+end
+
+exit 100
+
+# methods of Maildir object
+#[:dir, :unique_name, :info, :serializer, :write, :process, :info=, :passed?, :passed!, :replied?, :replied!, :seen?, :seen!, :trashed?, :trashed!, :draft?, :draft!, :flagged?, :flagged!, :flags, :flags=, :add_flag, :remove_flag, :filename, :key, :path, :data, :utime, :atime, :mtime, :destroy, :guard, :parse_key, :sort_flags, :old_path, :rename, :between?]
+
+# methods of Mail object
+
+#[:[], :[]=, :action, :add_charset, :add_content_transfer_encoding, :add_content_type, :add_date, :add_file, :add_message_id, :add_mime_version, :add_part, :add_transfer_encoding, :all_parts, :atom_safe?, :attachment, :attachment?, :attachments, :bcc, :bcc=, :bcc_addrs, :body, :body=, :body_encoding, :body_encoding=, :bounced?, :boundary, :bracket, :capitalize_field, :cc, :cc=, :cc_addrs, :charset, :charset=, :comments, :comments=, :constantize, :content_description, :content_description=, :content_disposition, :content_disposition=, :content_id, :content_id=, :content_location, :content_location=, :content_transfer_encoding, :content_transfer_encoding=, :content_type, :content_type=, :content_type_parameters, :convert_to_multipart, :dasherize, :date, :date=, :decode_body, :decoded, :default, :deliver, :deliver!, :delivery_handler, :delivery_handler=, :delivery_method, :delivery_status_part, :delivery_status_report?, :destinations, :diagnostic_code, :dquote, :encode!, :encoded, :envelope_date, :envelope_from, :error_status, :errors, :escape_paren, :filename, :final_recipient, :find_first_mime_type, :from, :from=, :from_addrs, :has_attachments?, :has_charset?, :has_content_transfer_encoding?, :has_content_type?, :has_date?, :has_message_id?, :has_mime_version?, :has_transfer_encoding?, :header, :header=, :header_fields, :headers, :html_part, :html_part=, :in_reply_to, :in_reply_to=, :inform_interceptors, :inform_observers, :is_marked_for_delete?, :keywords, :keywords=, :main_type, :map_lines, :map_with_index, :mark_for_delete=, :match_to_s, :message_content_type, :message_id, :message_id=, :method_missing, :mime_parameters, :mime_type, :mime_version, :mime_version=, :multipart?, :multipart_report?, :paren, :part, :parts, :perform_deliveries, :perform_deliveries=, :quote_atom, :quote_phrase, :quote_token, :raise_delivery_errors, :raise_delivery_errors=, :raw_envelope, :raw_source, :read, :ready_to_send!, :received, :received=, :references, :references=, :register_for_delivery_notification, :remote_mta, :reply, :reply_to, :reply_to=, :resent_bcc, :resent_bcc=, :resent_cc, :resent_cc=, :resent_date, :resent_date=, :resent_from, :resent_from=, :resent_message_id, :resent_message_id=, :resent_sender, :resent_sender=, :resent_to, :resent_to=, :retryable?, :return_path, :return_path=, :sender, :sender=, :set_envelope, :skip_deletion, :smtp_envelope_from, :smtp_envelope_from=, :smtp_envelope_to, :smtp_envelope_to=, :sub_type, :subject, :subject=, :text?, :text_part, :text_part=, :to, :to=, :to_addrs, :token_safe?, :transfer_encoding, :transport_encoding, :transport_encoding=, :unbracket, :underscoreize, :unparen, :unquote, :uri_escape, :uri_parser, :uri_unescape, :without_attachments!]
+
+
