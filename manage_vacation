@@ -9,17 +9,36 @@
 #  - works with Maildir format only
 #
 # 1. avoid processing autoreplies :)
-# 2. can Ruby talk to ManageSieve?
-#    there are ruby implementations of ManageSieve but would be good
-#    not to use them
 #
+# TODO: wrap into VacationAutoresponder class?
+
 
 require 'maildir'
 require 'mail'
+require 'yaml'
 
 @mailboxes_dir = "/home/mkrot/projects/my-linux-tools/tmp/"
 @dovecot_users_file = "/home/mkrot/projects/my-linux-tools/tmp/users"
 @debug = false
+
+@smtp_config_file = @mailboxes_dir + "/smtp.conf"
+
+######################################################################
+# Mailer configuration
+
+class Hash
+  def symbolize_keys
+    each_with_object({}) do |(k,v), hash|
+      hash[k.to_sym] = v
+    end
+  end
+end
+
+smtp_config = YAML.load_file(@smtp_config_file).symbolize_keys
+
+Mail.defaults do
+  delivery_method :smtp, smtp_config
+end
 
 ######################################################################
 
@@ -31,6 +50,14 @@ class Vacation
   attr_accessor :email_file
 
   attr_accessor :closed
+
+  def self.howto
+    outs = []
+    outs << "1) How to activate autoresponder. when becomes effective."
+    outs << "2) How to cancel autoresponder. when becomes effective"
+    outs << "3) when syntax is incorrect, this message is sent."
+    outs.join("\n")
+  end
 
   def initialize text
     @closed = false
@@ -131,7 +158,7 @@ class Vacation
 
   def closed= v
     @closed = v
-    @parsing_message = false if @closed
+    @parsing_message = false  if @closed
   end
 
 end
@@ -182,7 +209,7 @@ def load_dovecot_users
   end
 end
 
-# resolve to the same account synonyms: kiss/tibor
+# resolve to the same account synonyms
 def get_account_name email_addr
   account, other = email_addr.split '@'
   account.downcase! # Dovecot also does the same
@@ -190,6 +217,19 @@ def get_account_name email_addr
     account = @dovecot_accounts[account]
   end
   account
+end
+
+def send_howto_message email_address
+  text = "Your message does not contain valid activation or cancelation instructions."
+  text << "Therefore this very HOWTO is sent to you.\n\n" 
+  text << Vacation.howto
+
+  Mail.deliver do
+    to       email_address
+    from     @my_email_addresses.first
+    subject  'Vacation Autoresponder HOWTO'
+    body     text
+  end
 end
 
 ######################################################################
@@ -299,9 +339,20 @@ vacations.each do |account, vacs|
   #    probably not
   # Actually, if the last message is a help-request and the previous
   # one is correct message, then the previous one should be reacted
-end
 
-exit 100
+  howto_message_sent = false
+  vacs.each do |vac|
+    if vac.valid_request?
+      # TODO
+    else
+
+      unless howto_message_sent
+        send_howto_message vac.account_email
+        howto_message_sent = true
+      end
+    end
+  end
+end
 
 # methods of Maildir object
 #[:dir, :unique_name, :info, :serializer, :write, :process, :info=, :passed?, :passed!, :replied?, :replied!, :seen?, :seen!, :trashed?, :trashed!, :draft?, :draft!, :flagged?, :flagged!, :flags, :flags=, :add_flag, :remove_flag, :filename, :key, :path, :data, :utime, :atime, :mtime, :destroy, :guard, :parse_key, :sort_flags, :old_path, :rename, :between?]
