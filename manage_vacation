@@ -136,6 +136,7 @@ class Vacation
   attr_accessor :requested_at
   attr_accessor :account_name, :account_email
   attr_accessor :email_file
+  attr_reader   :errors
 
   attr_accessor :closed
 
@@ -162,7 +163,7 @@ class Vacation
   def initialize text=nil
     @closed = false
     @parsing_message = false
-    @valid_request = false
+    @errors = []
 
     parse text  if text
   end
@@ -194,16 +195,7 @@ class Vacation
       end
     end
 
-    # simple test to discriminate valid and invalid vacation requests
-    fields = [:starts_at, :ends_at]
-    if fields.all?{ |f| send(f) }
-      @valid_request = true
-    end
-
-    # TODO: add validity checks
-    # - starts_at must be before ends_at
-    # - both dates should not be before today
-    # allow to retrieve the message that describes the error
+    validate
   end
 
   def reset_parsed
@@ -262,7 +254,6 @@ class Vacation
 
   def cancel
     @canceled = true
-    @valid_request = true
     @deactivated_at = Time.now
   end
 
@@ -271,7 +262,7 @@ class Vacation
   end
 
   def valid_request?
-    @valid_request
+    @errors.empty?
   end
 
   def to_s
@@ -316,6 +307,31 @@ class Vacation
   def closed= v
     @closed = v
     @parsing_message = false  if @closed
+  end
+
+  def validate
+    if canceled?
+      # nothing to check
+
+    else
+      # check dates specified by the user
+      if self.starts_at && self.ends_at
+
+        if self.ends_at < self.starts_at
+          @errors << "Vacation last day can not be before the first day"
+        elsif self.ends_at < Date.today
+          @error << "Vacation last day can not be in the past"
+        end
+
+      else
+        unless self.starts_at
+          @errors << "must contain the first date of vacation"
+        end
+        unless self.ends_at
+          @errors << "must contain the last date of vacation"
+        end
+      end
+    end
   end
 
 end
@@ -388,33 +404,46 @@ end
 
 def send_howto_message vac
 
+  puts vac.errors.inspect
+
+  msg = "Your message does not contain valid activation or cancelation"
+  msg << " instructions. The following errors were encountered:"
+  vac.errors.each_with_index do |err, i|
+    msg << "\n #{i+1}) #{err}"
+  end
+  msg << "\n\nTherefore this very HOWTO is sent to you.\n\n" 
+  msg << Vacation.howto
+
   mail = create_mail_to vac.account_email
   mail.subject = 'Vacation Autoresponder HOWTO'
-
-  mail.body = "Your message does not contain valid activation or cancelation instructions."
-  mail.body << "Therefore this very HOWTO is sent to you.\n\n" 
-  mail.body << Vacation.howto
+  mail.body    = msg
 
   #mail.deliver! #TODO
 end
 
 def notify_vacation_autoresponder_activated vac
 
-  mail = create_mail_to vac.account_email
-  mail.subject = 'Vacation Autoresponder activated'
+  msg = "Vacation Autoresponder request accepted for the user"
+  msg << " #{vac.account_name}\n"
+  msg << "autoresponder will be activated on: #{vac.activated_at}"
+  msg << " and deactivated on: #{vac.deactivated_at}"
 
-  mail.body = "Vacation Autoresponder accepted for the user #{vac.account_name}\n"
-  mail.body << "autoresponder will be activated on: #{vac.activated_at}"
-  mail.body << " and deactivated on: #{vac.deactivated_at}"
+  mail = create_mail_to vac.account_email
+
+  mail.subject = 'Vacation Autoresponder activated'
+  mail.body    = msg
 
   #mail.deliver! # TODO
 end
 
 def notify_vacation_autoresponder_canceled vac
-  mail = create_mail_to vac.account_email
-  mail.subject = 'Vacation Autoresponder canceled'
+  msg = "Vacation Autoresponder will be deactivated for the user"
+  msg << " #{vac.account_name} shortly."
 
-  mail.body = "Vacation Autoresponder will be deactivated for the user #{vac.account_name} shortly."
+  mail = create_mail_to vac.account_email
+
+  mail.subject = 'Vacation Autoresponder canceled'
+  mail.body    = msg
 
   #mail.deliver! #TODO
 end
