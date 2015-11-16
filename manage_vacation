@@ -25,6 +25,7 @@
 require 'maildir'
 require 'mail'
 require 'yaml'
+require 'time'
 
 @mailboxes_dir = "/home/mkrot/projects/my-linux-tools/tmp/"
 @dovecot_users_file = "/home/mkrot/projects/my-linux-tools/tmp/users"
@@ -164,6 +165,10 @@ class Vacation
     @ends_at
   end
 
+  def message?
+    !@message.to_s.empty?
+  end
+
   def message
     @message || message_default
   end
@@ -207,6 +212,23 @@ class Vacation
       out << "*email path: #{email_file.path}"
     end
     out.join("\n")
+  end
+
+  def for_yaml
+    #.iso8601               #=> 2015-11-13T18:00:00+01:00
+    fmt = "%F %T %z"        #=> 2015-11-25 18:00:00 +0100
+    #fmt = "%d.%m.%Y %T %z" #=> 13.11.2015 18:00:00 +0100
+    #puts deactivated_at.strftime(fmt)
+
+    [
+      "account"           => account_name,
+      "email"             => account_email,
+      "activation_time"   => activated_at   ? 
+                               activated_at.strftime(fmt)   : nil,
+      "deactivation_time" => deactivated_at ? 
+                               deactivated_at.strftime(fmt) : nil,
+      "message"           => message? ? message : nil
+    ]
   end
 
   private
@@ -402,8 +424,10 @@ vacations.each do |account, vacs|
   ignore_remaining_requests = false
 
   vacs.each do |vac|
-    puts "= Vacation request user #{account}"
+    puts "== Vacation request user #{account}"
     puts vac.to_s
+    puts "= yaml ="
+    puts vac.for_yaml.to_yaml
     puts "\n"
 
     if ignore_remaining_requests
