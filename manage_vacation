@@ -452,7 +452,9 @@ vacations.each do |account, vacs|
 
     end
 
-    # TODO: delete this message
+    # delete this message
+    #vac.email_file.add_flag("T") # does not delete but merely marks as Trashed
+    #vac.email_file.destroy # TODO: yes, uncomment
   end
 end
 
