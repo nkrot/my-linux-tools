@@ -5,11 +5,20 @@
 #  https://github.com/ktheory/maildir
 #  https://github.com/mikel/mail
 #
+# Architecture
+# 1. a script that extracts instructions from user emails
+#    and writes this data into another file (vacations.yaml)
+# 2. TODO: a script that installs and removes Sieve scripts
+#    according to vacation.yaml.
+#    Notification should be sent to the user both when
+#    the script is installed or removed
+#    Ensure that (de)activation succeeds even if the datetime
+#    is in the past.
+# 
 # Include in the help message:
 #  - works with Maildir format only
 #
 # 1. avoid processing autoreplies :)
-#
 # TODO: wrap into VacationAutoresponder class?
 
 
@@ -44,8 +53,8 @@ end
 
 class Vacation
   attr_reader   :starts_at, :ends_at
+  attr_reader   :activated_at, :deactivated_at
   attr_accessor :requested_at
-  attr_reader   :canceled
   attr_accessor :account_name, :account_email
   attr_accessor :email_file
 
@@ -81,8 +90,7 @@ class Vacation
         @closed = true
         break
       elsif line =~ /^cancel/
-        @canceled = true
-        @valid_request = true
+        cancel
       elsif line =~ /^first (?:day|date):(.+)/
         @starts_at = $1
       elsif line =~ /^last (?:day|date):(.+)/
@@ -111,11 +119,13 @@ class Vacation
   def starts_at= val
     @parsing_message = false
     @starts_at = val.is_a?(Date) ? val : Date.parse(val)
+    @activated_at = @starts_at
   end
 
   def ends_at= val
     @parsing_message = false
     @ends_at = val.is_a?(Date) ? val : Date.parse(val)
+    @deactivated_at = @ends_at
   end
 
   def message
@@ -130,8 +140,14 @@ class Vacation
     @parsing_message
   end
 
+  def cancel
+    @canceled = true
+    @valid_request = true
+    @deactivated_at = Time.now
+  end
+
   def canceled?
-    canceled
+    @canceled
   end
 
   def valid_request?
@@ -219,17 +235,41 @@ def get_account_name email_addr
   account
 end
 
-def send_howto_message email_address
-  text = "Your message does not contain valid activation or cancelation instructions."
-  text << "Therefore this very HOWTO is sent to you.\n\n" 
-  text << Vacation.howto
+def create_mail_to addr
+  Mail.new to: addr, from: @my_email_addresses.first
+end
 
-  Mail.deliver do
-    to       email_address
-    from     @my_email_addresses.first
-    subject  'Vacation Autoresponder HOWTO'
-    body     text
-  end
+def send_howto_message vac
+
+  mail = create_mail_to vac.account_email
+  mail.subject = 'Vacation Autoresponder HOWTO'
+
+  mail.body = "Your message does not contain valid activation or cancelation instructions."
+  mail.body << "Therefore this very HOWTO is sent to you.\n\n" 
+  mail.body << Vacation.howto
+
+  mail.deliver!
+end
+
+def notify_vacation_autoresponder_installed vac
+
+  mail = create_mail_to vac.account_email
+  mail.subject = 'Vacation Autoresponder activated'
+
+  mail.body = "Vacation Autoresponder accepted for the user #{vac.account_name}\n"
+  mail.body << "autoresponder will be activated on: #{vac.activated_at}"
+  mail.body << " and deactivated on: #{vac.deactivated_at}"
+
+  mail.deliver!
+end
+
+def notify_vacation_autoresponder_canceled vac
+  mail = create_mail_to vac.account_email
+  mail.subject = 'Vacation Autoresponder canceled'
+
+  mail.body = "Vacation Autoresponder will be deactivated for the user #{vac.account_name} shortly"
+
+  mail.deliver!
 end
 
 ######################################################################
@@ -312,17 +352,6 @@ service_maildir = Maildir.new service_maildir_path, false
   end
 end
 
-# TODO:
-#       determine the most up to date Vacation request -- wrong!
-#       send notification to the user (and a copy to postmaster?)
-#         autoresponder will be activated at DateTime and deactivated at
-#         failed + help message
-#       install or remove sieve script when time is appropriate!
-# TODO: delete unnecessary emails
-#        - that do not require an action
-#        - after sieve script has been installed/removed
-# if there are several emails from a sender, delete all of them
-
 vacations.each do |account, vacs|
   puts "\n### #{vacs.length} vacation request(s) from account: #{account}"
 
@@ -330,27 +359,32 @@ vacations.each do |account, vacs|
   # so that the most recent message comes first
   vacs.sort_by!{ |vac| vac.requested_at }.reverse!
   
-  puts "Most recent request:\n#{vacs.first.to_s}"
-
-  # TODO:
-  # Find messages that need reaction
-  # Only the last message needs reaction. All other can be deleted.
-  # Q: should a help-request cancel the previous correct email?
-  #    probably not
-  # Actually, if the last message is a help-request and the previous
-  # one is correct message, then the previous one should be reacted
-
   howto_message_sent = false
-  vacs.each do |vac|
-    if vac.valid_request?
-      # TODO
-    else
+  ignore_remaining_requests = false
 
-      unless howto_message_sent
-        send_howto_message vac.account_email
-        howto_message_sent = true
+  vacs.each do |vac|
+    if ignore_remaining_requests
+      # skip
+
+    elsif vac.valid_request?
+
+      if vac.canceled?
+        # TODO: remove autoresponder
+        notify_vacation_autoresponder_installed vac
+      else
+        # TODO: install autoresponder
+        notify_vacation_autoresponder_canceled vac
       end
+
+      ignore_remaining_requests = true
+
+    elsif ! howto_message_sent
+      send_howto_message vac
+      howto_message_sent = true
+
     end
+
+    # TODO: delete this message
   end
 end
 
