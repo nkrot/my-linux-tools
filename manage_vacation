@@ -9,6 +9,7 @@
 # 1. a script that extracts instructions from user emails
 #    and writes this data into another file (vacations.yaml)
 #    TODO: add 'activate: now' to allowed syntax
+#    TODO: raise an error if starts_at is later or equal than ends_at
 # 2. TODO: a script that installs and removes Sieve scripts
 #    according to vacation.yaml.
 #    Notification should be sent to the user both when
@@ -99,19 +100,32 @@ class VacationsFile
     @data.send meth, *args
   end
 
-  def close
-    @file.close if @file
-  end
-
   def save
     File.open(@filepath, "w+") do |file|
       YAML.dump @data, file
     end
   end
+  alias close save
 
   def example
-    Vacation.sample_for_yaml
+    Vacation.sample_entry_for_config
   end
+
+  def add vac
+    if vac.respond_to? :for_config
+      vac = vac.for_config
+    end
+    vac.keys.each do |key|
+      if @data.key? key
+        @data.delete key
+      end
+      @data[key] = vac[key]
+    end
+  end
+end
+
+def vacations_config
+  @vacations_config ||= VacationsFile.new(@vacations_file)
 end
 
 ######################################################################
@@ -133,8 +147,7 @@ class Vacation
     outs.join("\n")
   end
 
-  # TODO: stupid name
-  def self.sample_for_yaml
+  def self.sample_entry_for_config
     obj = self.new
 
     obj.account_name  = "accountName"
@@ -143,7 +156,7 @@ class Vacation
     obj.ends_at = "10.1.2016"
     obj.message = obj.message_default
 
-    obj.for_yaml
+    obj.for_config
   end
 
   def initialize text=nil
@@ -186,6 +199,11 @@ class Vacation
     if fields.all?{ |f| send(f) }
       @valid_request = true
     end
+
+    # TODO: add validity checks
+    # - starts_at must be before ends_at
+    # - both dates should not be before today
+    # allow to retrieve the message that describes the error
   end
 
   def reset_parsed
@@ -275,7 +293,7 @@ class Vacation
     out.join("\n")
   end
 
-  def for_yaml
+  def for_config
     #.iso8601               #=> 2015-11-13T18:00:00+01:00
     fmt = "%F %T %z"        #=> 2015-11-25 18:00:00 +0100
     #fmt = "%d.%m.%Y %T %z" #=> 13.11.2015 18:00:00 +0100
@@ -414,10 +432,6 @@ unless File.directory? service_maildir_path
   exit 1
 end
 
-vacations_config = VacationsFile.new @vacations_file
-
-exit 100
-
 vacations = Hash.new{ |h,k| h[k] = [] }
 
 service_maildir = Maildir.new service_maildir_path, false
@@ -497,7 +511,7 @@ vacations.each do |account, vacs|
     puts "== Vacation request user #{account}"
     puts vac.to_s
     puts "= yaml ="
-    puts vac.for_yaml.to_yaml
+    puts vac.for_config.to_yaml
     puts "\n"
 
     if ignore_remaining_requests
@@ -511,6 +525,7 @@ vacations.each do |account, vacs|
         notify_vacation_autoresponder_canceled vac
       else
         # TODO: install autoresponder
+        vacations_config.add vac
         notify_vacation_autoresponder_activated vac
       end
 
@@ -530,6 +545,8 @@ vacations.each do |account, vacs|
     #vac.email_file.destroy # TODO: yes, uncomment
   end
 end
+
+vacations_config.close
 
 # methods of Maildir object
 #[:dir, :unique_name, :info, :serializer, :write, :process, :info=, :passed?, :passed!, :replied?, :replied!, :seen?, :seen!, :trashed?, :trashed!, :draft?, :draft!, :flagged?, :flagged!, :flags, :flags=, :add_flag, :remove_flag, :filename, :key, :path, :data, :utime, :atime, :mtime, :destroy, :guard, :parse_key, :sort_flags, :old_path, :rename, :between?]
