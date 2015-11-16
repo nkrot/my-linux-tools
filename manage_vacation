@@ -49,6 +49,26 @@ Mail.defaults do
   delivery_method :smtp, smtp_config
 end
 
+class Fixnum
+
+  # express in seconds
+  def hours
+    self * 60 * 60
+  end
+  alias hour hours
+
+  # express in minutes
+  def minutes
+    self * 60
+  end
+  alias minute minutes
+
+  def days
+    self * 24.hours
+  end
+  alias day days
+end
+
 ######################################################################
 
 class Vacation
@@ -92,9 +112,9 @@ class Vacation
       elsif line =~ /^cancel/
         cancel
       elsif line =~ /^first (?:day|date):(.+)/
-        @starts_at = $1
+        self.starts_at = $1
       elsif line =~ /^last (?:day|date):(.+)/
-        @ends_at = $1
+        self.ends_at = $1
       elsif line =~ /^message:(.*)/
         @message = $1.strip
         @parsing_message = true
@@ -119,13 +139,29 @@ class Vacation
   def starts_at= val
     @parsing_message = false
     @starts_at = val.is_a?(Date) ? val : Date.parse(val)
-    @activated_at = @starts_at
+
+    # Set Autoresponder activation time at 18:00 of the day
+    # before user vacation starts.
+    # If it happens to be on weekend, move it further to Friday
+    @activated_at = @starts_at.to_time - 6.hours
+    if @activated_at.sunday?
+      @activated_at -= 2.days
+    elsif @activated_at.saturday?
+      @activated_at -= 1.day
+    end
+
+    @starts_at
   end
 
   def ends_at= val
     @parsing_message = false
     @ends_at = val.is_a?(Date) ? val : Date.parse(val)
-    @deactivated_at = @ends_at
+
+    # set Autoresponder deactivation time at 18:00 of the last
+    # day of the user's vacation
+    @deactivated_at = @ends_at.to_time + 18.hours
+
+    @ends_at
   end
 
   def message
@@ -133,7 +169,7 @@ class Vacation
   end
 
   def message_default
-    'I am on vacation. Hopefully will manage to get back from Egypt.'
+    "I am on vacation from #{starts_at} through #{ends_at}"
   end
 
   def parsing_message?
@@ -160,11 +196,14 @@ class Vacation
     out << "email: #{account_email}"
     if canceled?
       out << "vacation: canceled"
+      out << "deactivated_at: #{deactivated_at}"
     else
       out << "from: #{starts_at}"
       out << "till: #{ends_at}"
       out << "message:\n#{message}\nend_of_message"
       out << "*requested at: #{requested_at}"
+      out << "*activated_at: #{activated_at}"
+      out << "*deactivated_at: #{deactivated_at}"
       out << "*email path: #{email_file.path}"
     end
     out.join("\n")
@@ -248,10 +287,10 @@ def send_howto_message vac
   mail.body << "Therefore this very HOWTO is sent to you.\n\n" 
   mail.body << Vacation.howto
 
-  mail.deliver!
+  #mail.deliver! #TODO
 end
 
-def notify_vacation_autoresponder_installed vac
+def notify_vacation_autoresponder_activated vac
 
   mail = create_mail_to vac.account_email
   mail.subject = 'Vacation Autoresponder activated'
@@ -260,16 +299,16 @@ def notify_vacation_autoresponder_installed vac
   mail.body << "autoresponder will be activated on: #{vac.activated_at}"
   mail.body << " and deactivated on: #{vac.deactivated_at}"
 
-  mail.deliver!
+  #mail.deliver! # TODO
 end
 
 def notify_vacation_autoresponder_canceled vac
   mail = create_mail_to vac.account_email
   mail.subject = 'Vacation Autoresponder canceled'
 
-  mail.body = "Vacation Autoresponder will be deactivated for the user #{vac.account_name} shortly"
+  mail.body = "Vacation Autoresponder will be deactivated for the user #{vac.account_name} shortly."
 
-  mail.deliver!
+  #mail.deliver! #TODO
 end
 
 ######################################################################
@@ -363,6 +402,10 @@ vacations.each do |account, vacs|
   ignore_remaining_requests = false
 
   vacs.each do |vac|
+    puts "= Vacation request user #{account}"
+    puts vac.to_s
+    puts "\n"
+
     if ignore_remaining_requests
       # skip
 
@@ -370,10 +413,11 @@ vacations.each do |account, vacs|
 
       if vac.canceled?
         # TODO: remove autoresponder
-        notify_vacation_autoresponder_installed vac
+        # TODO: it would be good to perform removal of the script right away
+        notify_vacation_autoresponder_canceled vac
       else
         # TODO: install autoresponder
-        notify_vacation_autoresponder_canceled vac
+        notify_vacation_autoresponder_activated vac
       end
 
       ignore_remaining_requests = true
