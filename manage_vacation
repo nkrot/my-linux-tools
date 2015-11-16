@@ -8,6 +8,7 @@
 # Architecture
 # 1. a script that extracts instructions from user emails
 #    and writes this data into another file (vacations.yaml)
+#    TODO: add 'activate: now' to allowed syntax
 # 2. TODO: a script that installs and removes Sieve scripts
 #    according to vacation.yaml.
 #    Notification should be sent to the user both when
@@ -32,9 +33,10 @@ require 'time'
 @debug = false
 
 @smtp_config_file = @mailboxes_dir + "/smtp.conf"
+@vacations_file = @mailboxes_dir + "/vacation/vacations.yml"
 
 ######################################################################
-# Mailer configuration
+# extensions to core classes (just for fun)
 
 class Hash
   def symbolize_keys
@@ -44,30 +46,72 @@ class Hash
   end
 end
 
+class Fixnum
+
+  # expressed in seconds
+  def hours
+    self * 60 * 60
+  end
+  alias hour hours
+
+  # expressed in minutes
+  def minutes
+    self * 60
+  end
+  alias minute minutes
+
+  # expressed in seconds
+  def days
+    self * 24.hours
+  end
+  alias day days
+end
+
+######################################################################
+# Mailer configuration
+
 smtp_config = YAML.load_file(@smtp_config_file).symbolize_keys
 
 Mail.defaults do
   delivery_method :smtp, smtp_config
 end
 
-class Fixnum
+######################################################################
+# class for managing vacations.yaml
+#
+# read the file
+# get a single entry as Vacation object
 
-  # express in seconds
-  def hours
-    self * 60 * 60
-  end
-  alias hour hours
+class VacationsFile
+  attr_reader :data
 
-  # express in minutes
-  def minutes
-    self * 60
-  end
-  alias minute minutes
+  def initialize filename
+    @filepath = filename
 
-  def days
-    self * 24.hours
+    if File.exists? @filepath
+      @data = YAML.load_file @filepath
+    else
+      @data = YAML.load example.to_yaml
+    end
   end
-  alias day days
+
+  def method_missing meth, *args
+    @data.send meth, *args
+  end
+
+  def close
+    @file.close if @file
+  end
+
+  def save
+    File.open(@filepath, "w+") do |file|
+      YAML.dump @data, file
+    end
+  end
+
+  def example
+    Vacation.sample_for_yaml
+  end
 end
 
 ######################################################################
@@ -89,12 +133,25 @@ class Vacation
     outs.join("\n")
   end
 
-  def initialize text
+  # TODO: stupid name
+  def self.sample_for_yaml
+    obj = self.new
+
+    obj.account_name  = "accountName"
+    obj.account_email = "accountName@example.com"
+    obj.starts_at = "1.1.2016"
+    obj.ends_at = "10.1.2016"
+    obj.message = obj.message_default
+
+    obj.for_yaml
+  end
+
+  def initialize text=nil
     @closed = false
     @parsing_message = false
     @valid_request = false
 
-    parse text
+    parse text  if text
   end
 
   # TODO: test if works with html
@@ -169,12 +226,16 @@ class Vacation
     !@message.to_s.empty?
   end
 
+  def message= str
+    @message = str.dup
+  end
+
   def message
     @message || message_default
   end
 
   def message_default
-    "I am on vacation from #{starts_at} through #{ends_at}"
+    "I am on vacation from #{starts_at || 'NoDate'} through #{ends_at || 'NoDate'}."
   end
 
   def parsing_message?
@@ -220,15 +281,16 @@ class Vacation
     #fmt = "%d.%m.%Y %T %z" #=> 13.11.2015 18:00:00 +0100
     #puts deactivated_at.strftime(fmt)
 
-    [
-      "account"           => account_name,
-      "email"             => account_email,
-      "activation_time"   => activated_at   ? 
-                               activated_at.strftime(fmt)   : nil,
-      "deactivation_time" => deactivated_at ? 
-                               deactivated_at.strftime(fmt) : nil,
-      "message"           => message? ? message : nil
-    ]
+    {
+      account_name => {
+        "email"             => account_email,
+        "activation_time"   => activated_at   ? 
+                                 activated_at.strftime(fmt)   : nil,
+        "deactivation_time" => deactivated_at ? 
+                                 deactivated_at.strftime(fmt) : nil,
+        "message"           => message? ? message : nil
+      }
+    }
   end
 
   private
@@ -262,7 +324,13 @@ def path_to_maildir account
   File.join @mailboxes_dir, account, "Maildir"
 end
 
-@dovecot_accounts = {}
+def dovecot_accounts
+  unless @dovecot_accounts
+    @dovecot_accounts = {}
+    load_dovecot_users
+  end
+  @dovecot_accounts
+end
 
 def load_dovecot_users
   return unless @dovecot_users_file
@@ -290,8 +358,8 @@ end
 def get_account_name email_addr
   account, other = email_addr.split '@'
   account.downcase! # Dovecot also does the same
-  if @dovecot_accounts.key? account
-    account = @dovecot_accounts[account]
+  if dovecot_accounts.key? account
+    account = dovecot_accounts[account]
   end
   account
 end
@@ -346,7 +414,9 @@ unless File.directory? service_maildir_path
   exit 1
 end
 
-load_dovecot_users
+vacations_config = VacationsFile.new @vacations_file
+
+exit 100
 
 vacations = Hash.new{ |h,k| h[k] = [] }
 
@@ -447,12 +517,15 @@ vacations.each do |account, vacs|
       ignore_remaining_requests = true
 
     elsif ! howto_message_sent
+      # send HOWTO message if the user sent us an incorrect request,
+      # but do it only once
       send_howto_message vac
       howto_message_sent = true
 
     end
 
     # delete this message
+    # we dont want to process it next time the script is run
     #vac.email_file.add_flag("T") # does not delete but merely marks as Trashed
     #vac.email_file.destroy # TODO: yes, uncomment
   end
