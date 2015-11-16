@@ -9,7 +9,7 @@
 # 1. a script that extracts instructions from user emails
 #    and writes this data into another file (vacations.yaml)
 #    TODO: add 'activate: now' to allowed syntax
-#    TODO: raise an error if starts_at is later or equal than ends_at
+#          this should also be default for cancel operation
 # 2. TODO: a script that installs and removes Sieve scripts
 #    according to vacation.yaml.
 #    Notification should be sent to the user both when
@@ -21,8 +21,12 @@
 #  - works with Maildir format only
 #
 # 1. avoid processing autoreplies :)
+#    an autoresponder is installed
+#    the user sends another msg (for canceling)
+#    autoresponder replies
+#    this script should not send a HOWTO to this reply
+#
 # TODO: wrap into VacationAutoresponder class?
-
 
 require 'maildir'
 require 'mail'
@@ -404,8 +408,6 @@ end
 
 def send_howto_message vac
 
-  puts vac.errors.inspect
-
   msg = "Your message does not contain valid activation or cancelation"
   msg << " instructions. The following errors were encountered:"
   vac.errors.each_with_index do |err, i|
@@ -548,17 +550,14 @@ vacations.each do |account, vacs|
 
     elsif vac.valid_request?
 
+      vacations_config.add vac
+      ignore_remaining_requests = true
+
       if vac.canceled?
-        # TODO: remove autoresponder
-        # TODO: it would be good to perform removal of the script right away
         notify_vacation_autoresponder_canceled vac
       else
-        # TODO: install autoresponder
-        vacations_config.add vac
         notify_vacation_autoresponder_activated vac
       end
-
-      ignore_remaining_requests = true
 
     elsif ! howto_message_sent
       # send HOWTO message if the user sent us an incorrect request,
@@ -576,12 +575,4 @@ vacations.each do |account, vacs|
 end
 
 vacations_config.close
-
-# methods of Maildir object
-#[:dir, :unique_name, :info, :serializer, :write, :process, :info=, :passed?, :passed!, :replied?, :replied!, :seen?, :seen!, :trashed?, :trashed!, :draft?, :draft!, :flagged?, :flagged!, :flags, :flags=, :add_flag, :remove_flag, :filename, :key, :path, :data, :utime, :atime, :mtime, :destroy, :guard, :parse_key, :sort_flags, :old_path, :rename, :between?]
-
-# methods of Mail object
-
-#[:[], :[]=, :action, :add_charset, :add_content_transfer_encoding, :add_content_type, :add_date, :add_file, :add_message_id, :add_mime_version, :add_part, :add_transfer_encoding, :all_parts, :atom_safe?, :attachment, :attachment?, :attachments, :bcc, :bcc=, :bcc_addrs, :body, :body=, :body_encoding, :body_encoding=, :bounced?, :boundary, :bracket, :capitalize_field, :cc, :cc=, :cc_addrs, :charset, :charset=, :comments, :comments=, :constantize, :content_description, :content_description=, :content_disposition, :content_disposition=, :content_id, :content_id=, :content_location, :content_location=, :content_transfer_encoding, :content_transfer_encoding=, :content_type, :content_type=, :content_type_parameters, :convert_to_multipart, :dasherize, :date, :date=, :decode_body, :decoded, :default, :deliver, :deliver!, :delivery_handler, :delivery_handler=, :delivery_method, :delivery_status_part, :delivery_status_report?, :destinations, :diagnostic_code, :dquote, :encode!, :encoded, :envelope_date, :envelope_from, :error_status, :errors, :escape_paren, :filename, :final_recipient, :find_first_mime_type, :from, :from=, :from_addrs, :has_attachments?, :has_charset?, :has_content_transfer_encoding?, :has_content_type?, :has_date?, :has_message_id?, :has_mime_version?, :has_transfer_encoding?, :header, :header=, :header_fields, :headers, :html_part, :html_part=, :in_reply_to, :in_reply_to=, :inform_interceptors, :inform_observers, :is_marked_for_delete?, :keywords, :keywords=, :main_type, :map_lines, :map_with_index, :mark_for_delete=, :match_to_s, :message_content_type, :message_id, :message_id=, :method_missing, :mime_parameters, :mime_type, :mime_version, :mime_version=, :multipart?, :multipart_report?, :paren, :part, :parts, :perform_deliveries, :perform_deliveries=, :quote_atom, :quote_phrase, :quote_token, :raise_delivery_errors, :raise_delivery_errors=, :raw_envelope, :raw_source, :read, :ready_to_send!, :received, :received=, :references, :references=, :register_for_delivery_notification, :remote_mta, :reply, :reply_to, :reply_to=, :resent_bcc, :resent_bcc=, :resent_cc, :resent_cc=, :resent_date, :resent_date=, :resent_from, :resent_from=, :resent_message_id, :resent_message_id=, :resent_sender, :resent_sender=, :resent_to, :resent_to=, :retryable?, :return_path, :return_path=, :sender, :sender=, :set_envelope, :skip_deletion, :smtp_envelope_from, :smtp_envelope_from=, :smtp_envelope_to, :smtp_envelope_to=, :sub_type, :subject, :subject=, :text?, :text_part, :text_part=, :to, :to=, :to_addrs, :token_safe?, :transfer_encoding, :transport_encoding, :transport_encoding=, :unbracket, :underscoreize, :unparen, :unquote, :uri_escape, :uri_parser, :uri_unescape, :without_attachments!]
-
 
