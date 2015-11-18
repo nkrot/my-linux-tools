@@ -36,7 +36,7 @@ require 'optparse'
 
 @mailboxes_dir = "/home/mkrot/projects/my-linux-tools/tmp/"
 @dovecot_users_file = "/home/mkrot/projects/my-linux-tools/tmp/users"
-@debug = false
+@debug = !false
 
 @smtp_config_file = @mailboxes_dir + "/smtp.conf"
 @vacations_file = @mailboxes_dir + "/vacation/vacations.yml"
@@ -131,10 +131,6 @@ class VacationsFile
       @data[key] = vac[key]
     end
   end
-end
-
-def vacations_config
-  @vacations_config ||= VacationsFile.new(@vacations_file)
 end
 
 ######################################################################
@@ -347,113 +343,278 @@ end
 
 ######################################################################
 
-def senders_in_our_domain msg
-  # as per RFC, the From field can contain several addresses
-  senders = msg.from.select do |addr|
-    username, domain, other = addr.split '@'
-    @our_domains.include?(domain.downcase)
+class VacationAutoresponder
+  attr_accessor :account_name
+  attr_accessor :debug
+
+  def initialize
+    @maildir_path = nil
+    @maildir = nil
+    @mydomains = []
+
+    @debug = false
   end
-  senders
-end
 
-def mail_to_me? msg
-  rcpt_addresses = [:to, :cc].map do |meth|
-    msg.send(meth)
-  end.flatten.compact.map(&:downcase)
-  !(@my_email_addresses - rcpt_addresses).empty?
-end
-
-def path_to_maildir account
-  File.join @mailboxes_dir, account, "Maildir"
-end
-
-def dovecot_accounts
-  unless @dovecot_accounts
-    @dovecot_accounts = {}
-    load_dovecot_users
+  def maildir_path= path
+    if File.directory? path
+      @maildir_path = path
+    else
+      $stderr.puts "ERROR: Maildir not found: #{path}"
+      exit 1
+    end
   end
-  @dovecot_accounts
-end
 
-def load_dovecot_users
-  return unless @dovecot_users_file
+  def my_domains= domains
+    @my_domains = domains.dup
+  end
 
-  if File.exists? @dovecot_users_file
-    File.readlines(@dovecot_users_file).each do |line|
-      line = line.chomp.sub(/\s#.*/, "")
-      if line =~ /^([^\s#:]+):.+user=([^\s@]+)@/
-        login_name, new_name = $1.downcase, $2.downcase
-        if @dovecot_accounts.key? login_name
-          $stderr.puts "WARNING: Duplicate login names in #{@dovecot_users_file}: #{login_name}"
+  def maildir
+    @maildir ||= Maildir.new @maildir_path, false
+  end
+
+  def process_emails
+    parse_emails
+    analyse_vacations
+  end
+
+  def vacations_file= path
+    @vacations_file = path
+  end
+
+  private
+
+  def parse_emails
+    @vacations = Hash.new{ |h,k| h[k] = [] }
+
+    [:cur, :new].each do |loc|
+      maildir.list(loc).each do |mailfile|
+
+        if @debug
+          puts "\n\n=== Processing Email ==="
+          puts mailfile.path
         end
-        if login_name != new_name
-          @dovecot_accounts[login_name] = new_name
+
+        msg = Mail.read mailfile.path
+
+        unless mail_to_me? msg
+          puts "Not a mail to me"
+          next
         end
+
+        senders = senders_in_my_domain(msg)
+
+        if senders.empty?
+          puts "Sender not in our domain: #{msg.from}"
+          next
+        end
+
+        if msg.multipart?
+          msg_body = msg.text_part || msg.html_part
+        else
+          msg_body = msg.body
+        end
+
+        vac = Vacation.new msg_body.decoded
+
+        # TODO: in theory, there can be several addresses in the From
+        # field and consequently in the senders array. But we ignore
+        # this situation for the moment.
+        
+        # Keep the original sender address to be able to send a notice
+        # back to the user.
+        vac.account_email = senders.first
+
+        # Store account name that will be used for:
+        # - computing the path to the mailbox
+        # - identifying vacation emails belonging to the same user
+        vac.account_name = get_account_name(vac.account_email)
+
+        # Set date on which request date was received.
+        # Necessary for finding out the vacation request that is most
+        # up-to-date and needs to be reacted.
+        vac.requested_at = msg.date
+
+        # Attach original email file, we may want to manipulate it
+        vac.email_file = mailfile
+        
+        if @debug
+          puts "=== Vacation object ==="
+          #puts vac.inspect
+          puts vac.to_s
+        end
+        
+        @vacations [vac.account_name] << vac
       end
     end
-  else
-    $stderr.puts "ERROR: Dovecot users file not found: #{@dovecot_users_file}"
-    exit 2
+  end
+
+  def analyse_vacations
+
+    @vacations.each do |account, vacs|
+      puts "\n### #{vacs.length} vacation request(s) from account: #{account}"
+
+      # sort messages from a single account in descending order
+      # so that the most recent message comes first
+      vacs.sort_by!{ |vac| vac.requested_at }.reverse!
+  
+      howto_message_sent = false
+      ignore_remaining_requests = false
+
+      vacs.each do |vac|
+        puts "== Vacation request user #{account}"
+        puts vac.to_s
+        puts "= yaml ="
+        puts vac.for_config.to_yaml
+        puts "\n"
+        
+        if ignore_remaining_requests
+          # skip
+
+        elsif vac.valid_request?
+          
+          vacations_config.add vac
+          ignore_remaining_requests = true
+          
+          if vac.canceled?
+            notify_vacation_autoresponder_canceled vac
+          else
+            notify_vacation_autoresponder_activated vac
+          end
+          
+        elsif ! howto_message_sent
+          # send HOWTO message if the user sent us an incorrect request,
+          # but do it only once
+          send_howto_message vac
+          howto_message_sent = true
+          
+        end
+
+        # delete this message
+        # we dont want to process it next time the script is run
+        #vac.email_file.add_flag("T") # does not delete but merely marks as Trashed
+        #vac.email_file.destroy # TODO: yes, uncomment
+      end
+    end
+
+    vacations_config.close
+  end
+
+  def vacations_config
+    @vacations_config ||= VacationsFile.new(@vacations_file)
+  end
+
+
+  def my_email_addresses
+    @my_email_addresses ||= @my_domains.map do |domain| 
+      "#{@account_name}@#{domain}"
+    end
+  end
+
+  def senders_in_my_domain msg
+    # as per RFC, the From field can contain several addresses
+    senders = msg.from.select do |addr|
+      username, domain, other = addr.split '@'
+      @my_domains.include?(domain.downcase)
+    end
+    senders
+  end
+
+  def mail_to_me? msg
+    rcpt_addresses = [:to, :cc].map do |meth|
+      msg.send(meth)
+    end.flatten.compact.map(&:downcase)
+    !(my_email_addresses - rcpt_addresses).empty?
+  end
+
+  def dovecot_accounts
+    unless @dovecot_accounts
+      @dovecot_accounts = {}
+      load_dovecot_users
+    end
+    @dovecot_accounts
+  end
+
+  def load_dovecot_users
+    return unless @dovecot_users_file
+    
+    if File.exists? @dovecot_users_file
+      File.readlines(@dovecot_users_file).each do |line|
+        line = line.chomp.sub(/\s#.*/, "")
+        if line =~ /^([^\s#:]+):.+user=([^\s@]+)@/
+          login_name, new_name = $1.downcase, $2.downcase
+          if @dovecot_accounts.key? login_name
+            $stderr.puts "WARNING: Duplicate login names in #{@dovecot_users_file}: #{login_name}"
+          end
+          if login_name != new_name
+            @dovecot_accounts[login_name] = new_name
+          end
+        end
+      end
+    else
+      $stderr.puts "ERROR: Dovecot users file not found: #{@dovecot_users_file}"
+      exit 2
+    end
+  end
+
+  # resolve to the same account synonyms
+  def get_account_name email_addr
+    account, other = email_addr.split '@'
+    account.downcase! # Dovecot also does the same
+    if dovecot_accounts.key? account
+      account = dovecot_accounts[account]
+    end
+    account
+  end
+
+  def create_mail_to addr
+    Mail.new to: addr, from: my_email_addresses.first
+  end
+
+  def send_howto_message vac
+
+    msg = "Your message does not contain valid activation or cancelation"
+    msg << " instructions. The following errors were encountered:"
+    vac.errors.each_with_index do |err, i|
+      msg << "\n #{i+1}) #{err}"
+    end
+    msg << "\n\nTherefore this very HOWTO is sent to you.\n\n" 
+    msg << Vacation.howto
+    
+    mail = create_mail_to vac.account_email
+    mail.subject = 'Vacation Autoresponder HOWTO'
+    mail.body    = msg
+    
+    #mail.deliver! #TODO
+  end
+  
+  def notify_vacation_autoresponder_activated vac
+    
+    msg = "Vacation Autoresponder request accepted for the user"
+    msg << " #{vac.account_name}\n"
+    msg << "autoresponder will be activated on: #{vac.activated_at}"
+    msg << " and deactivated on: #{vac.deactivated_at}"
+    
+    mail = create_mail_to vac.account_email
+    
+    mail.subject = 'Vacation Autoresponder activated'
+    mail.body    = msg
+
+    #mail.deliver! # TODO
+  end
+
+  def notify_vacation_autoresponder_canceled vac
+    msg = "Vacation Autoresponder will be deactivated for the user"
+    msg << " #{vac.account_name} shortly."
+    
+    mail = create_mail_to vac.account_email
+    
+    mail.subject = 'Vacation Autoresponder canceled'
+    mail.body    = msg
+    
+    #mail.deliver! #TODO
   end
 end
 
-# resolve to the same account synonyms
-def get_account_name email_addr
-  account, other = email_addr.split '@'
-  account.downcase! # Dovecot also does the same
-  if dovecot_accounts.key? account
-    account = dovecot_accounts[account]
-  end
-  account
-end
-
-def create_mail_to addr
-  Mail.new to: addr, from: @my_email_addresses.first
-end
-
-def send_howto_message vac
-
-  msg = "Your message does not contain valid activation or cancelation"
-  msg << " instructions. The following errors were encountered:"
-  vac.errors.each_with_index do |err, i|
-    msg << "\n #{i+1}) #{err}"
-  end
-  msg << "\n\nTherefore this very HOWTO is sent to you.\n\n" 
-  msg << Vacation.howto
-
-  mail = create_mail_to vac.account_email
-  mail.subject = 'Vacation Autoresponder HOWTO'
-  mail.body    = msg
-
-  #mail.deliver! #TODO
-end
-
-def notify_vacation_autoresponder_activated vac
-
-  msg = "Vacation Autoresponder request accepted for the user"
-  msg << " #{vac.account_name}\n"
-  msg << "autoresponder will be activated on: #{vac.activated_at}"
-  msg << " and deactivated on: #{vac.deactivated_at}"
-
-  mail = create_mail_to vac.account_email
-
-  mail.subject = 'Vacation Autoresponder activated'
-  mail.body    = msg
-
-  #mail.deliver! # TODO
-end
-
-def notify_vacation_autoresponder_canceled vac
-  msg = "Vacation Autoresponder will be deactivated for the user"
-  msg << " #{vac.account_name} shortly."
-
-  mail = create_mail_to vac.account_email
-
-  mail.subject = 'Vacation Autoresponder canceled'
-  mail.body    = msg
-
-  #mail.deliver! #TODO
-end
 
 ######################################################################
 # process options
@@ -474,131 +635,24 @@ OptionParser.new do |opts|
   end
 end.parse!
 
+######################################################################
+# other methods
+
+def path_to_maildir account
+  File.join @mailboxes_dir, account, "Maildir"
+end
 
 ######################################################################
 # MAIN
 
-service = "vacation"
-service_maildir_path = path_to_maildir service
+resp = VacationAutoresponder.new
+resp.account_name = "vacation"
+resp.maildir_path = path_to_maildir resp.account_name
+resp.my_domains = ["linguistics.rub.de", 
+                   "linguistics.ruhr-uni-bochum.de"]
+resp.vacations_file = @vacations_file # vacations.yaml
+ 
+resp.debug = @debug
 
-@our_domains = ["linguistics.rub.de", "linguistics.ruhr-uni-bochum.de"]
-@my_email_addresses = @our_domains.map { |dmn| "#{service}@#{dmn}" }
-
-unless File.directory? service_maildir_path
-  $stderr.puts "ERROR: Maildir not found: #{service_maildir_path}"
-  exit 1
-end
-
-vacations = Hash.new{ |h,k| h[k] = [] }
-
-service_maildir = Maildir.new service_maildir_path, false
-
-[:cur, :new].each do |loc|
-  service_maildir.list(loc).each do |mailfile|
-
-    if @debug
-      puts "\n\n=== Processing Email ==="
-      puts mailfile.path
-    end
-
-    msg = Mail.read(mailfile.path)
-
-    unless mail_to_me? msg
-      puts "Not a mail to me"
-      next
-    end
-
-    senders = senders_in_our_domain(msg)
-
-    if senders.empty?
-      puts "Sender not in our domain: #{msg.from}"
-      next
-    end
-
-    if msg.multipart?
-      msg_body = msg.text_part || msg.html_part
-    else
-      msg_body = msg.body
-    end
-
-    vac = Vacation.new msg_body.decoded
-
-    # TODO: in theory, there can be several addresses in the From
-    # field and consequently in the senders array. But we ignore
-    # this situation for the moment.
-
-    # Keep the original sender address to be able to send a notice
-    # back to the user.
-    vac.account_email = senders.first
-
-    # Store account name that will be used for:
-    # - computing the path to the mailbox
-    # - identifying vacation emails belonging to the same user
-    vac.account_name = get_account_name(vac.account_email)
-
-    # Set date on which request date was received.
-    # Necessary for finding out the vacation request that is most
-    # up-to-date and needs to be reacted.
-    vac.requested_at = msg.date
-
-    # Attach original email file, we may want to manipulate it
-    vac.email_file = mailfile
-
-    if @debug
-      puts "=== Vacation object ==="
-      #puts vac.inspect
-      puts vac.to_s
-    end
-
-    vacations [vac.account_name] << vac
-  end
-end
-
-vacations.each do |account, vacs|
-  puts "\n### #{vacs.length} vacation request(s) from account: #{account}"
-
-  # sort messages from a single account in descending order
-  # so that the most recent message comes first
-  vacs.sort_by!{ |vac| vac.requested_at }.reverse!
-  
-  howto_message_sent = false
-  ignore_remaining_requests = false
-
-  vacs.each do |vac|
-    puts "== Vacation request user #{account}"
-    puts vac.to_s
-    puts "= yaml ="
-    puts vac.for_config.to_yaml
-    puts "\n"
-
-    if ignore_remaining_requests
-      # skip
-
-    elsif vac.valid_request?
-
-      vacations_config.add vac
-      ignore_remaining_requests = true
-
-      if vac.canceled?
-        notify_vacation_autoresponder_canceled vac
-      else
-        notify_vacation_autoresponder_activated vac
-      end
-
-    elsif ! howto_message_sent
-      # send HOWTO message if the user sent us an incorrect request,
-      # but do it only once
-      send_howto_message vac
-      howto_message_sent = true
-
-    end
-
-    # delete this message
-    # we dont want to process it next time the script is run
-    #vac.email_file.add_flag("T") # does not delete but merely marks as Trashed
-    #vac.email_file.destroy # TODO: yes, uncomment
-  end
-end
-
-vacations_config.close
+resp.process_emails
 
