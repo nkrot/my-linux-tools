@@ -32,6 +32,7 @@ require 'maildir'
 require 'mail'
 require 'yaml'
 require 'time'
+require 'optparse'
 
 @mailboxes_dir = "/home/mkrot/projects/my-linux-tools/tmp/"
 @dovecot_users_file = "/home/mkrot/projects/my-linux-tools/tmp/users"
@@ -89,6 +90,10 @@ end
 
 class VacationsFile
   attr_reader :data
+
+  def self.example
+    Vacation.sample_entry_for_config.to_yaml
+  end
 
   def initialize filename
     @filepath = filename
@@ -155,11 +160,11 @@ class Vacation
   def self.sample_entry_for_config
     obj = self.new
 
-    obj.account_name  = "accountName"
-    obj.account_email = "accountName@example.com"
-    obj.starts_at = "1.1.2016"
-    obj.ends_at = "10.1.2016"
-    obj.message = obj.message_default
+    obj.account_name  = "johnsmith"
+    obj.account_email = "john.smith@example.com"
+    obj.starts_at = "13.1.2016"
+    obj.ends_at = "29.1.2016"
+    obj.message = "Example: I am on vacation from #{obj.starts_at} till #{obj.ends_at}."
 
     obj.for_config
   end
@@ -451,6 +456,27 @@ def notify_vacation_autoresponder_canceled vac
 end
 
 ######################################################################
+# process options
+
+OptionParser.new do |opts|
+  opts.banner = "
+  Do Cool Stuff
+"
+
+  opts.on('-h', '--help', 'display this message and exit') do
+    puts opts
+    exit 0
+  end
+
+  opts.on('--config-example', 'show example of vacations.yaml') do
+    puts Vacation.sample_entry_for_config.to_yaml
+    exit 0
+  end
+end.parse!
+
+
+######################################################################
+# MAIN
 
 service = "vacation"
 service_maildir_path = path_to_maildir service
