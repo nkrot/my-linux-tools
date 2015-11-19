@@ -343,7 +343,7 @@ end
 
 ######################################################################
 
-class VacationAutoresponder
+class EmailAnalyser
   attr_accessor :account_name
   attr_accessor :debug
 
@@ -351,6 +351,7 @@ class VacationAutoresponder
     @maildir_path = nil
     @maildir = nil
     @mydomains = []
+    @vacations = []
 
     @debug = false
   end
@@ -372,19 +373,19 @@ class VacationAutoresponder
     @maildir ||= Maildir.new @maildir_path, false
   end
 
+  def vacations
+    @vacations.dup
+  end
+
   def process_emails
     parse_emails
     analyse_vacations
   end
 
-  def vacations_file= path
-    @vacations_file = path
-  end
-
   private
 
   def parse_emails
-    @vacations = Hash.new{ |h,k| h[k] = [] }
+    @vacations_from_emails = Hash.new{ |h,k| h[k] = [] }
 
     [:cur, :new].each do |loc|
       maildir.list(loc).each do |mailfile|
@@ -443,14 +444,15 @@ class VacationAutoresponder
           puts vac.to_s
         end
         
-        @vacations [vac.account_name] << vac
+        @vacations_from_emails [vac.account_name] << vac
       end
     end
   end
 
   def analyse_vacations
+    @vacations = []
 
-    @vacations.each do |account, vacs|
+    @vacations_from_emails.each do |account, vacs|
       puts "\n### #{vacs.length} vacation request(s) from account: #{account}"
 
       # sort messages from a single account in descending order
@@ -472,7 +474,7 @@ class VacationAutoresponder
 
         elsif vac.valid_request?
           
-          vacations_config.add vac
+          @vacations << vac
           ignore_remaining_requests = true
           
           if vac.canceled?
@@ -495,14 +497,7 @@ class VacationAutoresponder
         #vac.email_file.destroy # TODO: yes, uncomment
       end
     end
-
-    vacations_config.close
   end
-
-  def vacations_config
-    @vacations_config ||= VacationsFile.new(@vacations_file)
-  end
-
 
   def my_email_addresses
     @my_email_addresses ||= @my_domains.map do |domain| 
@@ -584,7 +579,7 @@ class VacationAutoresponder
     mail.subject = 'Vacation Autoresponder HOWTO'
     mail.body    = msg
     
-    #mail.deliver! #TODO
+    #mail.deliver! #TODO, good, uncomment
   end
   
   def notify_vacation_autoresponder_activated vac
@@ -599,7 +594,7 @@ class VacationAutoresponder
     mail.subject = 'Vacation Autoresponder activated'
     mail.body    = msg
 
-    #mail.deliver! # TODO
+    #mail.deliver! # TODO, good, uncomment
   end
 
   def notify_vacation_autoresponder_canceled vac
@@ -611,7 +606,7 @@ class VacationAutoresponder
     mail.subject = 'Vacation Autoresponder canceled'
     mail.body    = msg
     
-    #mail.deliver! #TODO
+    #mail.deliver! #TODO, good, uncomment
   end
 end
 
@@ -645,14 +640,30 @@ end
 ######################################################################
 # MAIN
 
-resp = VacationAutoresponder.new
+resp = EmailAnalyser.new
 resp.account_name = "vacation"
 resp.maildir_path = path_to_maildir resp.account_name
-resp.my_domains = ["linguistics.rub.de", 
-                   "linguistics.ruhr-uni-bochum.de"]
-resp.vacations_file = @vacations_file # vacations.yaml
- 
-resp.debug = @debug
+resp.my_domains = ["linguistics.rub.de", "linguistics.ruhr-uni-bochum.de"]
+#resp.debug = @debug
 
 resp.process_emails
 
+# refactoring: moving VacationsFile from inside EmailAnalyser
+vacations_config = VacationsFile.new(@vacations_file)
+resp.vacations.each do |vac|
+  vacations_config.add vac
+end
+vacations_config.close
+
+# TODO: refactor vacations_{config,file} stuff
+# scan entries from vacations.yaml
+#   - those that were originally there
+#   - those that have just been added
+#
+# Analyse activation_time (AT) and deactivation_time (DT)
+#  if DT is in the past:
+#    - uninstall sieve filter for this account
+#    - delete this entry from vacations.yaml
+#  elsif AT is in the past:
+#    - install sieve filter
+#
