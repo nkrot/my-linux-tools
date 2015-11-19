@@ -34,13 +34,6 @@ require 'yaml'
 require 'time'
 require 'optparse'
 
-@mailboxes_dir = "/home/mkrot/projects/my-linux-tools/tmp/"
-@dovecot_users_file = "/home/mkrot/projects/my-linux-tools/tmp/users"
-@debug = !false
-
-@smtp_config_file = @mailboxes_dir + "/smtp.conf"
-@vacations_file = @mailboxes_dir + "/vacation/vacations.yml"
-
 ######################################################################
 # extensions to core classes (just for fun)
 
@@ -73,10 +66,47 @@ class Fixnum
   alias day days
 end
 
+class Time
+  def in_the_past?
+    self < Time.now
+  end
+end
+
+######################################################################
+# TODO: store it into a YAML file?
+
+class Conf
+  class << self
+    def mailboxes_dir
+      "/home/mkrot/projects/my-linux-tools/tmp/"
+    end
+
+    def smtp_conf_file
+      File.join mailboxes_dir, "smtp.conf"
+    end
+
+    # TODO: here vacation/ directory is actually mail account name
+    # of vacation autoresponder service.
+    def vacations_conf_file
+      File.join mailboxes_dir, "vacation", "vacations.yml"
+    end
+
+    def dovecot_users_file
+      #"/etc/dovecot/users" or "/etc/dovecot/linguistics.rub.de/users"
+      "/home/mkrot/projects/my-linux-tools/tmp/users"
+    end
+  end
+end
+
+#puts Conf.mailboxes_dir
+#puts Conf.smtp_conf_file
+#puts Conf.vacations_conf_file
+#puts Conf.dovecot_users_file
+
 ######################################################################
 # Mailer configuration
 
-smtp_config = YAML.load_file(@smtp_config_file).symbolize_keys
+smtp_config = YAML.load_file(Conf.smtp_conf_file).symbolize_keys
 
 Mail.defaults do
   delivery_method :smtp, smtp_config
@@ -120,15 +150,22 @@ class VacationsFile
     Vacation.sample_entry_for_config
   end
 
+  # TODO: needs refactoring
   def add vac
-    if vac.respond_to? :for_config
-      vac = vac.for_config
-    end
-    vac.keys.each do |key|
-      if @data.key? key
-        @data.delete key
+    if vac.is_a? Array
+      vac.each{ |v| add v }
+    else
+      # add single Vacation
+      if vac.respond_to? :for_config
+        vac = vac.for_config #=> Hash
       end
-      @data[key] = vac[key]
+      # add Hash
+      vac.keys.each do |key|
+        if @data.key? key
+          @data.delete key
+        end
+        @data[key] = vac[key]
+      end
     end
   end
 end
@@ -169,11 +206,13 @@ class Vacation
     @closed = false
     @parsing_message = false
     @errors = []
+    @deleted = false
 
     parse text  if text
   end
 
   # TODO: test if works with html
+  # TODO: add 'activate: now'
   def parse text
 
     puts "=== parsing text to find Vacation ==="
@@ -188,6 +227,8 @@ class Vacation
         break
       elsif line =~ /^cancel/
         cancel
+      elsif line =~ /^activate:\t*(now|jetzt)/
+        raise "ERROR: not supported:\n#{line}"
       elsif line =~ /^first (?:day|date):(.+)/
         self.starts_at = $1
       elsif line =~ /^last (?:day|date):(.+)/
@@ -259,7 +300,7 @@ class Vacation
 
   def cancel
     @canceled = true
-    @deactivated_at = Time.now
+    @deactivated_at = Time.now - 1
   end
 
   def canceled?
@@ -289,6 +330,7 @@ class Vacation
     out.join("\n")
   end
 
+  # TODO: ugly. maybe move converter to VacationFile?
   def for_config
     #.iso8601               #=> 2015-11-13T18:00:00+01:00
     fmt = "%F %T %z"        #=> 2015-11-25 18:00:00 +0100
@@ -380,6 +422,7 @@ class EmailAnalyser
   def process_emails
     parse_emails
     analyse_vacations
+    @vacations
   end
 
   private
@@ -530,15 +573,15 @@ class EmailAnalyser
   end
 
   def load_dovecot_users
-    return unless @dovecot_users_file
+    return unless Conf.dovecot_users_file
     
-    if File.exists? @dovecot_users_file
-      File.readlines(@dovecot_users_file).each do |line|
+    if File.exists? Conf.dovecot_users_file
+      File.readlines(Conf.dovecot_users_file).each do |line|
         line = line.chomp.sub(/\s#.*/, "")
         if line =~ /^([^\s#:]+):.+user=([^\s@]+)@/
           login_name, new_name = $1.downcase, $2.downcase
           if @dovecot_accounts.key? login_name
-            $stderr.puts "WARNING: Duplicate login names in #{@dovecot_users_file}: #{login_name}"
+            $stderr.puts "WARNING: Duplicate login names in #{Conf.dovecot_users_file}: #{login_name}"
           end
           if login_name != new_name
             @dovecot_accounts[login_name] = new_name
@@ -546,7 +589,7 @@ class EmailAnalyser
         end
       end
     else
-      $stderr.puts "ERROR: Dovecot users file not found: #{@dovecot_users_file}"
+      $stderr.puts "ERROR: Dovecot users file not found: #{Conf.dovecot_users_file}"
       exit 2
     end
   end
@@ -610,13 +653,16 @@ class EmailAnalyser
   end
 end
 
-
 ######################################################################
 # process options
+
+@debug = false
 
 OptionParser.new do |opts|
   opts.banner = "
   Do Cool Stuff
+In the current implementation all configuration parameters are hardcoded.
+USAGE: #{File.basename($0)} [OPTIONS]
 "
 
   opts.on('-h', '--help', 'display this message and exit') do
@@ -628,18 +674,54 @@ OptionParser.new do |opts|
     puts Vacation.sample_entry_for_config.to_yaml
     exit 0
   end
+
+  opts.on('--debug', 'self explanatory') do
+    @debug = true
+  end
+
+
 end.parse!
 
 ######################################################################
 # other methods
 
+# TODO: move this method into Conf?
 def path_to_maildir account
-  File.join @mailboxes_dir, account, "Maildir"
+  File.join Conf.mailboxes_dir, account, "Maildir"
+end
+
+# TODO
+# PROBLEM: need to know sieve configuration that is
+# available in dovecot config only. or hardcode it
+# or define a class Dovecot that reads dovecot files.
+# at least it provides kind of separation of concerns
+def create_sieve_environment
+end
+
+# TODO:
+# TODO: in --test mode the script is configure to reply
+#       to specific From addresses
+def install_sieve_script vac
+  # make sure it works if no previously defined sieve
+  # scripts are available
+  create_sieve_environment
+end
+
+# TODO
+def uninstall_sieve_script vac
+  # vac.account_name
+  maildir = path_to_maildir vac.account_name
+  # send notification to the user
+  # vac.account_email
 end
 
 ######################################################################
 # MAIN
 
+# load vacation requests from vacations.yaml
+vacations = VacationsFile.new Conf.vacations_conf_file
+
+# find new vacation autoresponder requests in the mailbox
 resp = EmailAnalyser.new
 resp.account_name = "vacation"
 resp.maildir_path = path_to_maildir resp.account_name
@@ -647,23 +729,24 @@ resp.my_domains = ["linguistics.rub.de", "linguistics.ruhr-uni-bochum.de"]
 #resp.debug = @debug
 
 resp.process_emails
+vacations.add resp.vacations
 
-# refactoring: moving VacationsFile from inside EmailAnalyser
-vacations_config = VacationsFile.new(@vacations_file)
-resp.vacations.each do |vac|
-  vacations_config.add vac
+# now when we have a complete set of vacation requests
+# we want to install/remove sieve scripts
+vacations.each do |vac|
+  if vac.deactivated_at.in_the_past?
+    # uninstall sieve filter for this account
+    uninstall_sieve_script vac
+    # delete this entry from vacations.yaml
+    vac.mark_as_deleted # or is vac.cancel enough? TODO
+
+  elsif vac.activated_at.in_the_past?
+    install_sieve_script vac
+
+  end
 end
-vacations_config.close
 
-# TODO: refactor vacations_{config,file} stuff
-# scan entries from vacations.yaml
-#   - those that were originally there
-#   - those that have just been added
-#
-# Analyse activation_time (AT) and deactivation_time (DT)
-#  if DT is in the past:
-#    - uninstall sieve filter for this account
-#    - delete this entry from vacations.yaml
-#  elsif AT is in the past:
-#    - install sieve filter
-#
+
+# write updated vacations.yaml
+vacations.save
+
