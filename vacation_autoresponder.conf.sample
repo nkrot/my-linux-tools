@@ -1,0 +1,48 @@
+# This is a sample configulation file for the Vacation Autoresponder
+service_name: Vacation Autoresponder
+service_email: vacation@mydomain.com
+
+# List of the domains that the server deems its own domains.
+# Only mail coming from these domains is processed by the service.
+domains:
+  - mydomain.com
+  - myotherdomain.com
+
+# The username under which the vacation service is known to the mail server
+# Should be the same as smtp:user_name below
+service_account_name: vacation
+
+# The full path to this resource is computed based on the value
+# of mailboxes_dir parameter.
+vacations_file: vacations.yml
+
+# Top directory under which mail home directories of individual users
+# are located (see Dovecot 10-mail.conf)
+mailboxes_dir: /var/vmail/
+# Dovecot users file is the Dovecot userdb/passdb. Access to this file
+# is necessary to provide mapping of user names to account names:
+# - if a user was renamed
+# - if a user is known under various names
+dovecot_users_file: /etc/dovecot/users
+
+# The following should be the same as Dovecot configuration files.
+# The full path to these resources is computed based on the value
+# of mailboxes_dir parameter.
+# defined in /etc/dovecot/conf.d/10-mail.conf
+mail_dir: Maildir
+# defined in /etc/dovecot/conf.d/90-sieve.conf
+sieve_dir: sieve
+# defined in /etc/dovecot/conf.d/90-sieve.conf
+sieve_active_file: .dovecot.sieve
+
+# the following can be set to arbitrary values
+sieve_vacation_file: vacation.sieve
+sieve_main_file:     main.sieve
+
+smtp:
+  address: smtp.mydomain.com
+  domain: mydomain.com
+  port: 587
+  user_name: vacation
+  password: PasswordOfVacation
+
