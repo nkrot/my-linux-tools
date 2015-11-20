@@ -8,25 +8,23 @@
 # NOTE: ideally, this script should run as the user under which
 # Dovecot runs, for example, vmail
 #
-# Architecture
-# 1. a script that extracts instructions from user emails
-#    and writes this data into another file (vacations.yaml)
-#    TODO: add 'activate: now' to allowed syntax
-#          this should also be default for cancel operation
-# 2. TODO: a script that installs and removes Sieve scripts
-#    according to vacation.yaml.
-#    Notification should be sent to the user both when
-#    the script is installed or removed
-#    Ensure that (de)activation succeeds even if the datetime
-#    is in the past.
-# 
 # 1. avoid processing autoreplies :)
-#    an autoresponder is installed
+#    autoresponder is installed
 #    the user sends another msg (for canceling)
 #    autoresponder replies
 #    this script should not send a HOWTO to this reply
 #
 # TODO: wrap into VacationAutoresponder class?
+# TODO: add 'activate: now' to allowed syntax
+#       this should also be default for cancel operation
+# TODO: check that the user is valid (known to dovecot)
+# TODO: how to treat mail coming from illegal users
+#       (users from different domains)? Delete?
+# TODO: add --test mode that installs autoresponder
+#       only for specific users and only with specific sender addresses
+#       that can be defined in vacation_autoresponder.conf
+#       and also via the command line
+# TODO: write Vacation.howto
 #
 # Examples to try:
 # manage_vacation --show-sieve-script --from=talpus@gmail.com,tux@linguistics.rub.de
@@ -43,6 +41,9 @@ require 'optparse'
 class Hash
   def symbolize_keys
     each_with_object({}) do |(k,v), hash|
+      if v.is_a? Hash
+        v = v.symbolize_keys
+      end
       hash[k.to_sym] = v
     end
   end
@@ -73,30 +74,35 @@ class Time
   def in_the_past?
     self < Time.now
   end
+
+  def in_the_future?
+    self > Time.now
+  end
 end
 
 ######################################################################
-# TODO: store it in a YAML file?
 
 class Conf
+
   class << self
-    def mailboxes_dir
-      "/home/mkrot/projects/my-linux-tools/tmp/"
+
+    def file= path
+      @@config = YAML.load_file(path).symbolize_keys
     end
 
-    def smtp_conf_file
-      File.join mailboxes_dir, "smtp.conf"
+    def from_service
+      "#{@@config[:service_name]} <#{@@config[:service_email]}>"
     end
 
-    # TODO: here vacation/ directory is actually mail account name
-    # of vacation autoresponder service.
-    def vacations_conf_file
-      File.join mailboxes_dir, "vacation", "vacations.yml"
+    def method_missing meth, *args
+      @@config[meth.to_sym]
     end
 
-    def dovecot_users_file
-      #"/etc/dovecot/users" or "/etc/dovecot/linguistics.rub.de/users"
-      "/home/mkrot/projects/my-linux-tools/tmp/users"
+    # TODO: maybe somewhere under /var/ ?
+    def vacations_file
+      File.join mailboxes_dir, 
+                @@config[:service_account_name], # vacation
+                @@config[:vacations_file]        # vacations.yml
     end
 
     def mail_home account
@@ -104,51 +110,40 @@ class Conf
     end
 
     def mail_dir account
-      File.join mail_home(account), "Maildir"
+      File.join mail_home(account), @@config[:mail_dir] # "Maildir"
+    end
+
+    def service_mail_dir
+      mail_dir @@config[:service_account_name]
     end
 
     def sieve_dir account
-      File.join mail_home(account), "sieve"
+      File.join mail_home(account), @@config[:sieve_dir] # "sieve"
     end
 
     def sieve_vacation_file account
-      File.join sieve_dir(account), "vacation.sieve"
+      File.join sieve_dir(account), @@config[:sieve_vacation_file] #"vacation.sieve"
     end
 
     def sieve_main_file account
-      File.join sieve_dir(account), "main.sieve"
+      File.join sieve_dir(account), @@config[:sieve_main_file] # "main.sieve"
     end
 
-    # As defined in /etc/dovecot/conf.d/90-sieve.conf
-    # this should be the *link* to a script in sieve/
-    # the link is normally managed by ManageSieve
     def sieve_active_file account
-      File.join mail_home(account), ".dovecot.sieve"
+      File.join mail_home(account), @@config[:sieve_active_file] # .dovecot.sieve
     end
   end
 end
 
-#puts Conf.mailboxes_dir
-#puts Conf.smtp_conf_file
-#puts Conf.vacations_conf_file
-#puts Conf.dovecot_users_file
-
 ######################################################################
-# Mailer configuration
 
-smtp_config = YAML.load_file(Conf.smtp_conf_file).symbolize_keys
-
-Mail.defaults do
-  delivery_method :smtp, smtp_config
-end
-
-# TODO: refactor?
 class Mailer
   class << self
 
-    def create_mail_to addr
-      # TODO: oops. from-address is also hardcoded in EmailAnalyser
-      Mail.new to: addr, from: 'vacation@linguistics.rub.de'
+    def send_mail other_params
+      params = { from: Conf.from_service }.merge(other_params)
+      mail = Mail.new params
+      mail.deliver!
     end
 
     def send_howto_message vac
@@ -160,11 +155,14 @@ class Mailer
       end
       msg << "\n\nTherefore this very HOWTO is sent to you. Enjoy!\n\n" 
       msg << Vacation.howto
-    
-      mail = create_mail_to vac.account_email
-      mail.subject = 'Vacation Autoresponder HOWTO'
-      mail.body    = msg
-      #mail.deliver! #TODO, good, uncomment
+
+      params = {
+        to:       vac.account_email,
+        subject: 'Vacation Autoresponder HOWTO',
+        body:     msg
+      }
+
+      send_mail params
     end
 
     def notify_vacation_autoresponder_accepted vac
@@ -173,46 +171,56 @@ class Mailer
       msg << " #{vac.account_name}\n"
       msg << "autoresponder will be activated on: #{vac.activated_at}"
       msg << " and deactivated on: #{vac.deactivated_at}"
-    
-      mail = create_mail_to vac.account_email
-    
-      mail.subject = 'Vacation request accepted'
-      mail.body    = msg
-      #mail.deliver! # TODO, good, uncomment
+
+      params = {
+        to:       vac.account_email,
+        subject: 'Vacation request accepted',
+        body:     msg
+      }
+
+      send_mail params
     end
 
     def notify_vacation_autoresponder_canceled vac
       msg = "Dear User,"
       msg << "\nVacation Autoresponder will be deactivated for you shortly."
-      
-      mail = create_mail_to vac.account_email
-      mail.subject = 'Vacation Cancelation request accepted'
-      mail.body    = msg
-    
-      #mail.deliver! #TODO, good, uncomment
+
+      params = {
+        to:       vac.account_email,
+        subject: 'Vacation Cancelation request accepted',
+        body:     msg
+      }
+
+      send_mail params
     end
 
     def notify_vacation_autoresponder_activated vac
-      # send notification to the user
+
       msg = "Dear user,"
       msg << "\nVacation autoresponder has just been activated for you."
       msg << "The following message will be sent:\n#{vac.message}"
       msg << "\nIt will be deactivated on #{vac.deactivated_at}"
 
-      mail = create_mail_to vac.account_email
-      mail.subject = 'Vacation Autoresponder activated'
-      mail.body    = msg
-      #mail.deliver! # TODO, good, uncomment
+      params = {
+        to:       vac.account_email,
+        subject: 'Vacation Autoresponder activated',
+        body:     msg
+      }
+
+      send_mail params
     end
 
     def notify_vacation_autoresponder_deactivated vac
       msg = "Dear user,"
       msg << "\nVacation autoresponder has just been deactivated."
 
-      mail = create_mail_to vac.account_email
-      mail.subject = 'Vacation Autoresponder deactivated'
-      mail.body    = msg
-      #mail.deliver! # TODO, good, uncomment
+      params = {
+        to:       vac.account_email,
+        subject: 'Vacation Autoresponder deactivated',
+        body:     msg
+      }
+
+      send_mail params
     end
   end
 end
@@ -276,7 +284,22 @@ class SieveScript
       lines.map! do |line|
         line.chomp!
         if line =~ /include\s+:personal\s+['"]vacation['"]/ && line =~ /^#/
-          line.sub! /^#.*include/, "include"
+          line.sub! /^#.*include/, "include"  # uncomment the line
+          changed = true
+        end
+        line
+      end
+
+      changed
+    end
+
+    def deactivate_vacation! lines
+      changed = false
+
+      lines.map! do |line|
+        line.chomp!
+        if line =~ /include\s+:personal\s+['"]vacation['"]/ && line !~ /^#/
+          line = "#" + line  # comment the line
           changed = true
         end
         line
@@ -590,6 +613,7 @@ class Vacation
   end
 
   # TODO: ugly. maybe move converter to VacationsFile?
+  # after all, activation_time is VacationFile speak
   def for_config
     #.iso8601               #=> 2015-11-13T18:00:00+01:00
     fmt = "%F %T %z"        #=> 2015-11-25 18:00:00 +0100
@@ -631,10 +655,10 @@ class Vacation
 
       else
         unless self.starts_at
-          @errors << "must contain the first date of vacation"
+          @errors << "Request must contain the first date of vacation"
         end
         unless self.ends_at
-          @errors << "must contain the last date of vacation"
+          @errors << "Request must contain the last date of vacation"
         end
       end
     end
@@ -713,6 +737,8 @@ class EmailAnalyser
           puts "Sender not in our domain: #{msg.from}"
           next
         end
+
+        # TODO: check that the user is valid (known to dovecot)
 
         if msg.multipart?
           msg_body = msg.text_part || msg.html_part
@@ -810,7 +836,7 @@ class EmailAnalyser
 
   def my_email_addresses
     @my_email_addresses ||= @my_domains.map do |domain| 
-      "#{@account_name}@#{domain}"
+      [@account_name, domain].join("@")
     end
   end
 
@@ -940,10 +966,24 @@ def install_sieve_script vac
   Mailer.notify_vacation_autoresponder_activated vac
 end
 
-# TODO
 def uninstall_sieve_script vac
-  # vac.account_name
-  maildir = Conf.mail_dir vac.account_name
+
+  # delete vacation.sieve
+  sieve_vacation_file = Conf.sieve_vacation_file vac.account_name
+  verboser "Deleting #{sieve_vacation_file} file"
+  if File.exist? sieve_vacation_file
+    File.delete sieve_vacation_file
+  end
+
+  # amend main.sieve
+  sieve_main_file = Conf.sieve_main_file vac.account_name
+  verboser "Deactivating vacation entry in #{sieve_main_file}"
+  lines = IO.readlines sieve_main_file
+  if SieveScript.deactivate_vacation! lines
+    File.open sieve_main_file, "w+" do |file|
+      file.puts lines.join("\n")
+    end
+  end
 
   Mailer.notify_vacation_autoresponder_deactivated vac
 end
@@ -955,24 +995,40 @@ end
 
 OptionParser.new do |opts|
   opts.banner = "
-  Do Cool Stuff
-In the current implementation all configuration parameters are hardcoded.
+  This script analyses emails coming to special account and
+1) generates vacations.yaml file that specifies when vacation autoresponder
+   should be de/activated and for which user.
+   See --show-vacations-example
+2) de/activates vacation autoresponder by un/installing appropriate Sieve
+   script in the mail account of appropriate user(s)
+Important:
+The script should be run either as root or as the same user as Dovecot runs.
 The script works with Maildir format only.
+Email in plain text is preferred (parsing of html not tested).
 USAGE: #{File.basename($0)} [OPTIONS]
+OPTIONS:
 "
+
   opts.on('-h', '--help', 'display this message and exit') do
     puts opts
     exit 0
   end
 
-  opts.on('--show-config-example', 'show example of vacations.yaml') do
+  @options[:conf_file] = File.join ".", 'vacation_autoresponder.conf'
+  opts.on('-c FILE', '--conf FILE',
+          'path to configuration file (in YAML format)',
+          "Default: #{@options[:conf_file]}") do |val|
+    @options[:conf_file] = val
+  end
+
+  opts.on('--show-vacations-example', 'show example of vacations.yaml') do
     puts Vacation.example_entry_for_config.to_yaml
     exit 0
   end
 
   @options[:show_sieve_script] = false
   opts.on('--show-sieve-script',
-          'show the content of vacation.sieve script that will be installed',
+          'show the bolerplate vacation.sieve script that will be installed',
           'In addition, try it with --from option.') do
     @options[:show_sieve_script] = true
   end
@@ -1001,17 +1057,23 @@ if @options[:show_sieve_script]
   exit 0
 end
 
+Conf.file = @options[:conf_file]
+
+Mail.defaults do
+  delivery_method :smtp, Conf.smtp
+end
+
 ######################################################################
 # MAIN
 
 # load vacation requests from vacations.yaml
-vacations = VacationsFile.new Conf.vacations_conf_file
+vacations = VacationsFile.new Conf.vacations_file
 
 # find new vacation autoresponder requests in the mailbox
 email_analyser = EmailAnalyser.new
-email_analyser.account_name = "vacation"
-email_analyser.maildir_path = Conf.mail_dir email_analyser.account_name
-email_analyser.my_domains = ["linguistics.rub.de", "linguistics.ruhr-uni-bochum.de"]
+email_analyser.account_name = Conf.service_account_name
+email_analyser.maildir_path = Conf.service_mail_dir
+email_analyser.my_domains = Conf.domains
 #email_analyser.debug = @options[:debug]
 
 email_analyser.process_emails
@@ -1036,9 +1098,13 @@ vacations.each do |vac|
     verboser "Activating autoresponder for #{vac.account_name}"
     install_sieve_script vac
 
+  elsif vac.activated_at.in_the_future?
+    verboser "Skipping #{vac.account_name}. Activation is still in the future"
+
   end
 end
 
 # write updated vacations.yaml
 vacations.save
 
+# EOF ################################################################
