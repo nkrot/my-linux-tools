@@ -142,6 +142,81 @@ Mail.defaults do
   delivery_method :smtp, smtp_config
 end
 
+# TODO: refactor?
+class Mailer
+  class << self
+
+    def create_mail_to addr
+      # TODO: oops. from-address is also hardcoded in EmailAnalyser
+      Mail.new to: addr, from: 'vacation@linguistics.rub.de'
+    end
+
+    def send_howto_message vac
+      msg = "Dear User,"
+      msg << "\nYour message does not contain valid activation or cancelation"
+      msg << " instructions. The following errors were encountered:"
+      vac.errors.each_with_index do |err, i|
+        msg << "\n #{i+1}) #{err}"
+      end
+      msg << "\n\nTherefore this very HOWTO is sent to you. Enjoy!\n\n" 
+      msg << Vacation.howto
+    
+      mail = create_mail_to vac.account_email
+      mail.subject = 'Vacation Autoresponder HOWTO'
+      mail.body    = msg
+      #mail.deliver! #TODO, good, uncomment
+    end
+
+    def notify_vacation_autoresponder_accepted vac
+    
+      msg = "Vacation request accepted for the user"
+      msg << " #{vac.account_name}\n"
+      msg << "autoresponder will be activated on: #{vac.activated_at}"
+      msg << " and deactivated on: #{vac.deactivated_at}"
+    
+      mail = create_mail_to vac.account_email
+    
+      mail.subject = 'Vacation request accepted'
+      mail.body    = msg
+      #mail.deliver! # TODO, good, uncomment
+    end
+
+    def notify_vacation_autoresponder_canceled vac
+      msg = "Dear User,"
+      msg << "\nVacation Autoresponder will be deactivated for you shortly."
+      
+      mail = create_mail_to vac.account_email
+      mail.subject = 'Vacation Cancelation request accepted'
+      mail.body    = msg
+    
+      #mail.deliver! #TODO, good, uncomment
+    end
+
+    def notify_vacation_autoresponder_activated vac
+      # send notification to the user
+      msg = "Dear user,"
+      msg << "\nVacation autoresponder has just been activated for you."
+      msg << "The following message will be sent:\n#{vac.message}"
+      msg << "\nIt will be deactivated on #{vac.deactivated_at}"
+
+      mail = create_mail_to vac.account_email
+      mail.subject = 'Vacation Autoresponder activated'
+      mail.body    = msg
+      #mail.deliver! # TODO, good, uncomment
+    end
+
+    def notify_vacation_autoresponder_deactivated vac
+      msg = "Dear user,"
+      msg << "\nVacation autoresponder has just been deactivated."
+
+      mail = create_mail_to vac.account_email
+      mail.subject = 'Vacation Autoresponder deactivated'
+      mail.body    = msg
+      #mail.deliver! # TODO, good, uncomment
+    end
+  end
+end
+
 ######################################################################
 
 class SieveScript
@@ -258,7 +333,7 @@ class VacationsFile
   attr_reader :data
 
   def self.example
-    Vacation.sample_entry_for_config.to_yaml
+    Vacation.example_entry_for_config.to_yaml
   end
 
   def initialize filename
@@ -266,8 +341,18 @@ class VacationsFile
 
     if File.exists? @filepath
       @data = YAML.load_file @filepath
+
+      @data.each do |account_name, entry|
+        vac = Vacation.new entry
+        vac.account_name = account_name
+        @data[account_name] = vac
+      end
+
+      # delete example entry
+      @data.delete_if{ |k,v| v.example? }
+
     else
-      @data = YAML.load example.to_yaml
+      @data = Hash.new
     end
   end
 
@@ -275,51 +360,28 @@ class VacationsFile
     @data.send meth, *args
   end
 
-  # TODO: do not save vacations that are canceled
-  # Hopefully, corresponding Sieve script has been uninstalled
   def save
+    data = {}
+
+    # add the example entry, always at the beginning
+    data.merge! Vacation.example_entry_for_config
+
+    # add real entries, except those that have been canceled/deactivated
+    @data.values.each do |vac|
+      data.merge!(vac.for_config)  unless vac.canceled?
+    end
+
     File.open(@filepath, "w+") do |file|
-      YAML.dump @data, file
+      YAML.dump data, file
     end
   end
   alias close save
 
-  def example
-    Vacation.sample_entry_for_config
-  end
-
-  # TODO: needs refactoring
   def add vac
     if vac.is_a? Array
       vac.each{ |v| add v }
-    else
-      # add single Vacation
-      if vac.respond_to? :for_config
-        vac = vac.for_config #=> Hash
-      end
-      # add Hash
-      vac.keys.each do |key|
-        if @data.key? key
-          @data.delete key
-        end
-        @data[key] = vac[key]
-      end
-    end
-  end
-
-  # convert items in 
-  # TODO: ugly. this is temporary
-  def convert_to_vacation!
-    @data.each do |key, hash|
-      unless hash.is_a? Vacation
-        vac = Vacation.new
-        vac.account_name   = key
-        vac.account_email  = hash["email"]
-        vac.activated_at   = hash["activation_time"]
-        vac.deactivated_at = hash["deactivation_time"]
-        vac.message        = hash["message"]
-        @data[key] = vac
-      end
+    elsif vac.is_a? Vacation
+      @data[vac.account_name] = vac
     end
   end
 
@@ -350,7 +412,7 @@ class Vacation
     outs.join("\n")
   end
 
-  def self.sample_entry_for_config
+  def self.example_entry_for_config
     obj = self.new
 
     obj.account_name  = "johnsmith"
@@ -362,21 +424,45 @@ class Vacation
     obj.for_config
   end
 
-  def initialize text=nil
+  def initialize obj=nil
     @closed = false
     @parsing_message = false
     @errors = []
     @deleted = false
+    @fake = false
+    @debug = false
 
-    parse text  if text
+    if !obj
+      # skip
+    elsif obj.is_a? String
+      parse_text obj
+    elsif obj.is_a? Hash
+      parse_hash obj
+    elsif obj.is_a? self.class
+      # TODO: make a deep copy
+    else
+      raise "ERROR: Invalid data type #{obj.class} of:\n#{obj}"
+    end
+
+  end
+
+  def parse_hash hash
+    self.account_email  = hash["email"]
+    self.activated_at   = hash["activation_time"]
+    self.deactivated_at = hash["deactivation_time"]
+    self.message        = hash["message"]
+
+    @fake = self.account_email == "john.smith@example.com"
   end
 
   # TODO: test if works with html
   # TODO: add 'activate: now'
-  def parse text
+  def parse_text text
 
-    puts "=== parsing text to find Vacation ==="
-    puts text
+    if @debug
+      puts "=== parsing text to find Vacation ==="
+      puts text
+    end
 
     text.split(/\n/).each do |line|
       line.chomp!
@@ -479,6 +565,11 @@ class Vacation
     @errors.empty?
   end
 
+  def example?
+    @fake
+  end
+  alias fake? example?
+
   def to_s
     out = []
     out << "account: #{account_name}"
@@ -493,12 +584,12 @@ class Vacation
       out << "*requested at: #{requested_at}"
       out << "*activated_at: #{activated_at}"
       out << "*deactivated_at: #{deactivated_at}"
-      out << "*email path: #{email_file.path}"
+      out << "*email path: #{email_file ? email_file.path : nil}"
     end
     out.join("\n")
   end
 
-  # TODO: ugly. maybe move converter to VacationFile?
+  # TODO: ugly. maybe move converter to VacationsFile?
   def for_config
     #.iso8601               #=> 2015-11-13T18:00:00+01:00
     fmt = "%F %T %z"        #=> 2015-11-25 18:00:00 +0100
@@ -667,7 +758,9 @@ class EmailAnalyser
     @vacations = []
 
     @vacations_from_emails.each do |account, vacs|
-      puts "\n### #{vacs.length} vacation request(s) from account: #{account}"
+      if @debug
+        puts "\n### #{vacs.length} vacation request(s) from account: #{account}"
+      end
 
       # sort messages from a single account in descending order
       # so that the most recent message comes first
@@ -677,11 +770,13 @@ class EmailAnalyser
       ignore_remaining_requests = false
 
       vacs.each do |vac|
-        puts "== Vacation request user #{account}"
-        puts vac.to_s
-        puts "= yaml ="
-        puts vac.for_config.to_yaml
-        puts "\n"
+        if @debug
+          puts "== Vacation request user #{account}"
+          puts vac.to_s
+          puts "= yaml ="
+          puts vac.for_config.to_yaml
+          puts "\n"
+        end
         
         if ignore_remaining_requests
           # skip
@@ -692,15 +787,15 @@ class EmailAnalyser
           ignore_remaining_requests = true
           
           if vac.canceled?
-            notify_vacation_autoresponder_canceled vac
+            Mailer.notify_vacation_autoresponder_canceled vac
           else
-            notify_vacation_autoresponder_accepted vac
+            Mailer.notify_vacation_autoresponder_accepted vac
           end
           
         elsif ! howto_message_sent
           # send HOWTO message if the user sent us an incorrect request,
           # but do it only once
-          send_howto_message vac
+          Mailer.send_howto_message vac
           howto_message_sent = true
           
         end
@@ -774,54 +869,7 @@ class EmailAnalyser
     end
     account
   end
-
-  def create_mail_to addr
-    Mail.new to: addr, from: my_email_addresses.first
-  end
-
-  def send_howto_message vac
-
-    msg = "Your message does not contain valid activation or cancelation"
-    msg << " instructions. The following errors were encountered:"
-    vac.errors.each_with_index do |err, i|
-      msg << "\n #{i+1}) #{err}"
-    end
-    msg << "\n\nTherefore this very HOWTO is sent to you.\n\n" 
-    msg << Vacation.howto
-    
-    mail = create_mail_to vac.account_email
-    mail.subject = 'Vacation Autoresponder HOWTO'
-    mail.body    = msg
-    
-    #mail.deliver! #TODO, good, uncomment
-  end
-  
-  def notify_vacation_autoresponder_accepted vac
-    
-    msg = "Vacation request accepted for the user"
-    msg << " #{vac.account_name}\n"
-    msg << "autoresponder will be activated on: #{vac.activated_at}"
-    msg << " and deactivated on: #{vac.deactivated_at}"
-    
-    mail = create_mail_to vac.account_email
-    
-    mail.subject = 'Vacation request accepted'
-    mail.body    = msg
-
-    #mail.deliver! # TODO, good, uncomment
-  end
-
-  def notify_vacation_autoresponder_canceled vac
-    msg = "Vacation Autoresponder will be deactivated for the user"
-    msg << " #{vac.account_name} shortly."
-    
-    mail = create_mail_to vac.account_email
-    
-    mail.subject = 'Vacation Cancelation request accepted'
-    mail.body    = msg
-    
-    #mail.deliver! #TODO, good, uncomment
-  end
+ 
 end
 
 ######################################################################
@@ -889,25 +937,15 @@ def install_sieve_script vac
     end
   end
 
-  # send notification to the user
-  msg = "Dear user,"
-  msg << "\nVacation autoresponder has just been activated for you."
-  msg << "The following message will be sent:\n#{vac.message}"
-  msg << "\nIt will be deactivated on #{vac.deactivation_time}"
-
-  mail = create_mail_to vac.account_email
-  mail.subject = 'Vacation Autoresponder activated'
-  mail.body    = msg
-
-  #mail.deliver! # TODO, good, uncomment
+  Mailer.notify_vacation_autoresponder_activated vac
 end
 
 # TODO
 def uninstall_sieve_script vac
   # vac.account_name
   maildir = Conf.mail_dir vac.account_name
-  # TODO: send notification to the user
-  # vac.account_email
+
+  Mailer.notify_vacation_autoresponder_deactivated vac
 end
 
 ######################################################################
@@ -928,7 +966,7 @@ USAGE: #{File.basename($0)} [OPTIONS]
   end
 
   opts.on('--show-config-example', 'show example of vacations.yaml') do
-    puts Vacation.sample_entry_for_config.to_yaml
+    puts Vacation.example_entry_for_config.to_yaml
     exit 0
   end
 
@@ -970,30 +1008,29 @@ end
 vacations = VacationsFile.new Conf.vacations_conf_file
 
 # find new vacation autoresponder requests in the mailbox
-resp = EmailAnalyser.new
-resp.account_name = "vacation"
-resp.maildir_path = Conf.mail_dir resp.account_name
-resp.my_domains = ["linguistics.rub.de", "linguistics.ruhr-uni-bochum.de"]
-#resp.debug = @options[:debug]
+email_analyser = EmailAnalyser.new
+email_analyser.account_name = "vacation"
+email_analyser.maildir_path = Conf.mail_dir email_analyser.account_name
+email_analyser.my_domains = ["linguistics.rub.de", "linguistics.ruhr-uni-bochum.de"]
+#email_analyser.debug = @options[:debug]
 
-resp.process_emails
-vacations.add resp.vacations
+email_analyser.process_emails
+
+# merge vacation requests from the two above sources
+vacations.add email_analyser.vacations
 
 verboser "\n***** STEP 2: manage the Sieve scripts for *****\n"
 verboser "Number of requests to process: #{vacations.length}"
 
-# TODO: ugly!! get rid of it, refactor VacationsFile
-vacations.convert_to_vacation!
-
 # Now that we have a complete set of vacation requests, we want to
 # to install/remove sieve scripts.
 vacations.each do |vac|
-  puts vac.inspect
+  #puts vac.to_s
 
   if vac.deactivated_at.in_the_past?
     verboser "Deactivating autoresponder for #{vac.account_name}"
     uninstall_sieve_script vac
-    vac.cancel  # delete this entry from vacations.yaml
+    vac.cancel  # will delete this entry from vacations.yaml
 
   elsif vac.activated_at.in_the_past?
     verboser "Activating autoresponder for #{vac.account_name}"
@@ -1003,5 +1040,5 @@ vacations.each do |vac|
 end
 
 # write updated vacations.yaml
-#vacations.save
+vacations.save
 
