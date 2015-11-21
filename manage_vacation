@@ -157,7 +157,7 @@ class Conf
     end
 
     def sieve_vacation_file account
-      File.join sieve_dir(account), @@config[:sieve_vacation_file] #"vacation.sieve"
+      File.join sieve_dir(account), @@config[:sieve_vacation_file] # "vacation.sieve"
     end
 
     def sieve_main_file account
@@ -201,7 +201,7 @@ class Mailer
     end
 
     def notify_vacation_autoresponder_accepted vac
-    
+
       msg = "Vacation request accepted for the user"
       msg << " #{vac.account_name}\n"
       msg << "autoresponder will be activated on: #{vac.activated_at}"
@@ -364,7 +364,7 @@ class SieveScript
       lines << ""
       lines << 'require ["variables", "vacation"];'
       lines << ""
-      
+
       # set variable <originalSubject>
       lines << 'if header :matches "Subject" "*" { set "originalSubject" ": ${1}"; }'
       lines << ""
@@ -592,7 +592,7 @@ containing the word
 
   cancel
 
-## BUGS
+## BUG REPORTS
 
 Send bugreports and suggestions for impovement to:
 
@@ -806,9 +806,9 @@ Send bugreports and suggestions for impovement to:
     {
       account_name => {
         "email"             => account_email,
-        "activation_time"   => activated_at   ? 
+        "activation_time"   => activated_at   ?
                                  activated_at.strftime(fmt)   : nil,
-        "deactivation_time" => deactivated_at ? 
+        "deactivation_time" => deactivated_at ?
                                  deactivated_at.strftime(fmt) : nil,
         "message"           => message? ? message : nil
       }
@@ -962,7 +962,7 @@ class EmailAnalyser
         # TODO: in theory, there can be several addresses in the From
         # field and consequently in the senders array. But we ignore
         # this situation for the moment.
-        
+
         # Keep the original sender address to be able to send a notice
         # back to the user.
         vac.account_email = senders.first
@@ -979,13 +979,13 @@ class EmailAnalyser
 
         # Attach original email file, we may want to manipulate it
         vac.email_file = mailfile
-        
+
         if @debug
           puts "=== Vacation object ==="
           #puts vac.inspect
           puts vac.to_s
         end
-        
+
         @vacations_from_emails [vac.account_name] << vac
       end
     end
@@ -1002,7 +1002,7 @@ class EmailAnalyser
       # sort messages from a single account in descending order
       # so that the most recent message comes first
       vacs.sort_by!{ |vac| vac.requested_at }.reverse!
-  
+
       howto_message_sent = false
       ignore_remaining_requests = false
 
@@ -1014,15 +1014,15 @@ class EmailAnalyser
           puts vac.for_config.to_yaml
           puts "\n"
         end
-        
+
         if ignore_remaining_requests
           # skip
 
         elsif vac.valid_request?
-          
+
           @vacations << vac
           ignore_remaining_requests = true
-          
+
           if vac.canceled?
             # TODO: cancelation happens immediately
             # perhaps there is no need to send this email to avoid
@@ -1031,19 +1031,19 @@ class EmailAnalyser
           else
             Mailer.notify_vacation_autoresponder_accepted vac
           end
-          
+
         elsif ! howto_message_sent
           # send HOWTO message if the user sent us an incorrect request,
           # but do it only once
           Mailer.send_howto_message vac
           howto_message_sent = true
-          
+
         end
 
         # delete this message
         # we dont want to process it next time the script is run
         #vac.email_file.add_flag("T") # does not delete but merely marks as Trashed
-        #vac.email_file.destroy # TODO: yes, uncomment
+        vac.email_file.destroy # TODO: yes, uncomment
       end
     end
   end
@@ -1081,7 +1081,7 @@ class EmailAnalyser
 
   def load_dovecot_users
     return unless Conf.dovecot_users_file
-    
+
     if File.exists? Conf.dovecot_users_file
       File.readlines(Conf.dovecot_users_file).each do |line|
         line = line.chomp.sub(/\s#.*/, "")
@@ -1105,7 +1105,7 @@ class EmailAnalyser
     account, other = email_addr.split '@'
     dovecot_accounts[account.downcase]
   end
- 
+
   def known_email? email_addr
     !! get_account_name(email_addr)
   end
