@@ -17,7 +17,7 @@
 # TODO: wrap into VacationAutoresponder class?
 # TODO: add 'activate: now' to allowed syntax
 #       this should also be default for cancel operation
-# TODO: check that the user is valid (known to dovecot)
+# TODO: add logging mechanism
 # TODO: how to treat mail coming from illegal users
 #       (users from different domains)? Delete?
 # TODO: add --test mode that installs autoresponder
@@ -727,18 +727,21 @@ class EmailAnalyser
         msg = Mail.read mailfile.path
 
         unless mail_to_me? msg
-          puts "Not a mail to me"
+#          puts "Not a mail to me"
           next
         end
 
         senders = senders_in_my_domain(msg)
 
         if senders.empty?
-          puts "Sender not in our domain: #{msg.from}"
+#          puts "Sender not in our domain: #{msg.from}"
           next
         end
 
-        # TODO: check that the user is valid (known to dovecot)
+        unless known_email? senders.first
+#          puts "User email unknown: #{senders.first}"
+          next
+        end
 
         if msg.multipart?
           msg_body = msg.text_part || msg.html_part
@@ -875,9 +878,7 @@ class EmailAnalyser
           if @dovecot_accounts.key? login_name
             $stderr.puts "WARNING: Duplicate login names in #{Conf.dovecot_users_file}: #{login_name}"
           end
-          if login_name != new_name
-            @dovecot_accounts[login_name] = new_name
-          end
+          @dovecot_accounts[login_name] = new_name
         end
       end
     else
@@ -887,15 +888,15 @@ class EmailAnalyser
   end
 
   # resolve to the same account synonyms
+  # return nil if the email address is unknown
   def get_account_name email_addr
     account, other = email_addr.split '@'
-    account.downcase! # Dovecot also does the same
-    if dovecot_accounts.key? account
-      account = dovecot_accounts[account]
-    end
-    account
+    dovecot_accounts[account.downcase]
   end
  
+  def known_email? email_addr
+    !! get_account_name(email_addr)
+  end
 end
 
 ######################################################################
