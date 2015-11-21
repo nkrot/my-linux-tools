@@ -383,7 +383,7 @@ class SieveScript
       lines << indent + "vacation"
       lines << indent + "  :days 1"
       lines << indent + "  :subject \"#{subject}\""
-      lines << indent + "  :text\n#{args[:text]}\n;"
+      lines << indent + "  text:\n#{args[:text]}\n.\n;"
 
       if args.key? :from
         lines << "}"
