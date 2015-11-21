@@ -43,7 +43,7 @@ class Hash
   def symbolize_keys
     each_with_object({}) do |(k,v), hash|
       if v.is_a? Hash
-        v = v.symbolize_keys
+       v = v.symbolize_keys
       end
       hash[k.to_sym] = v
     end
@@ -442,10 +442,121 @@ class Vacation
   attr_accessor :closed
 
   def self.howto
+    # TODO: get rid of this hardcode. Note Conf.service_email is not
+    # yet accessible at this point.
+    service_email = "vacation@linguistics.rub.de"
+
     outs = []
-    outs << "1) How to activate autoresponder. when becomes effective."
-    outs << "2) How to cancel autoresponder. when becomes effective"
-    outs << "3) when syntax is incorrect, this message is sent."
+
+    outs << "
+## SYNOPSYS
+
+The purpose of this service is to allow users to activate/deactivate Vacation
+Autoresponder for their own email account.
+
+Interaction with the service is carried out by sending emails to the special
+address that is specified in the configuration file, typically:
+
+   #{service_email}
+
+The email should contain Autoresponder activation or deactivation instructions
+as described further in this document. If the email is not recognized as a valid
+request, this very HOWTO is sent in reply.
+
+There is a delay between the time when the email arrives and when the email is
+processed, depending on how corresponding cron job is configured. Be patient.
+
+Plain text emails are preferred. Html emails were not tested. Configure your
+mailer to include plain text when sending to this account
+
+TODO:
+- How emails are filtered to avoid unauthorized use
+- How it work with mailing lists
+
+## HOW TO ACTIVATE AUTORESPONDER
+
+To activate the Autoresponder, the user should send an email containing
+at least two dates: the date when the vacation starts and ends. The dates
+should be given in the format DD.MM.YYYY (e.g. 31.12.2015). The following
+is an example of such a request email:
+
+   first day: 20.12.2015
+   last day: 14.01.2016
+
+Please note that the dates should be given on separate lines and the colon
+is obligatory.
+
+In addition, there is a possibility to specify a message that will be sent
+in the automatic reply. The message is introduced by the keyword 'message'
+followed by a colon and desired text.
+
+   message: I am on vacation.
+
+The message text can span over various lines:
+
+   message: Dear Friend,
+   I am on vacation and therefore can not answer your email immediately.
+   Please excuse. Better, try finding the answer to your question yourself.
+   Sincerely yours,
+   Sinsereli Yohrs
+
+If no message is specified, the default one will be sent:
+
+   #{self.new.message_default}
+
+Optionally, the instructions for the Autoresponder Service can be ended
+with the special keyword '=end'. The use of the end-keyword allows combining
+in a single email both the conventional email to human recipients and
+the instructions to the Autoresponder Service. For example, the following
+is a valid example:
+
+   Dear Colleagues,
+
+   I am leaving on vacation soon. In addition to the common X-mas vacation,
+   I am taking a few extra days. For urgent issues, please contact 112.
+
+   first day: 20.12.2015                                          **
+   last day: 14.01.2016                                           **
+   message: Hi! I am on X-mas vacation enjoying skiing in Alps    **
+   Hope you also enjoy this merry period.                         **
+   =end
+
+   Have nice holidays too.
+   Best regards,
+   Sins Yohrs
+
+In the above example, only the lines marked with ** will be used by
+the Autoresponder.
+
+By default the Autoresponder is activated at 18:00 on the day before
+the vacation starts as specified by 'first day' keyword. If the scheduled
+day of activation happens to be Saturday or Sunday, it is shifted to Friday.
+
+There is only one possibility to override the default activation time,
+namely by including 'activate: now' stanza. For example
+
+   first day: 20.12.2015
+   last day: 14.01.2016
+   activate: now
+   message: ....
+
+## HOW TO DEACTIVATE AUTORESPONDER
+
+Deactivation of the Autoresponder Service happens automatically on the date
+that was specified as the last day of the vacation, more precisely at 18:00.
+
+However, the Autoresponder can be deactivated at any time by sending an email
+containing the word
+
+  cancel
+
+## BUGS
+
+Send bugreports and suggestions for impovement to:
+
+   Mikalai Krot <talpus@gmail.com> or <krot@linguistics.rub.de>
+
+"
     outs.join("\n")
   end
 
@@ -503,20 +614,21 @@ class Vacation
 
     text.split(/\n/).each do |line|
       line.chomp!
-      if line =~ /^=vacation/
+      line.strip!
+      if line =~ /^=vacation/i
         reset_parsed
-      elsif line =~ /=end/
+      elsif line =~ /=end/i
         @closed = true
         break
-      elsif line =~ /^(cancel|deactivate)/
+      elsif line =~ /^(cancel|deactivate)/i
         cancel
-      elsif line =~ /^activate:\t*(now|jetzt)/
+      elsif line =~ /^activate:\s*(now|jetzt)/i
         self.activated_at = Time.now - 1, freeze=true
-      elsif line =~ /^first (?:day|date):(.+)/
+      elsif line =~ /^first (?:day|date):(.+)/i
         self.starts_at = $1
-      elsif line =~ /^last (?:day|date):(.+)/
+      elsif line =~ /^last (?:day|date):(.+)/i
         self.ends_at = $1
-      elsif line =~ /^message:(.*)/
+      elsif line =~ /^message:(.*)/i
         @message = $1.strip
         @parsing_message = true
       elsif parsing_message?
@@ -540,6 +652,7 @@ class Vacation
     # Set Autoresponder activation time at 18:00 of the day
     # before user vacation starts.
     # If it happens to be on weekend, move it further to Friday
+    # NOTE: this is described in Vacation.howto, keep in sync
     activated_at = @starts_at.to_time - 6.hours
     if activated_at.sunday?
       activated_at -= 2.days
@@ -558,6 +671,7 @@ class Vacation
 
     # set Autoresponder deactivation time at 18:00 of the last
     # day of the user's vacation
+    # NOTE: described in Vacation.howto, keep in sync
     @deactivated_at = @ends_at.to_time + 18.hours
 
     @ends_at
@@ -595,7 +709,7 @@ class Vacation
   end
 
   def message_default
-    "I am on vacation from #{starts_at || 'NoDate'} through #{ends_at || 'NoDate'}."
+    "I am on vacation from #{starts_at || '<NoDate>'} through #{ends_at || '<NoDate>'}."
   end
 
   def parsing_message?
@@ -1066,6 +1180,14 @@ OPTIONS:
 
   opts.on('-h', '--help', 'display this message and exit') do
     puts opts
+    exit 0
+  end
+
+#  @options[:show_howto] = false
+  opts.on('--help-request-howto',
+          'display HOWTO on how to request/cancel vacation autoresponder') do
+#    @options[:show_howto] = true
+    puts Vacation.howto
     exit 0
   end
 
