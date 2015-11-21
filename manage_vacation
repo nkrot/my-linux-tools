@@ -8,14 +8,13 @@
 # NOTE: ideally, this script should run as the user under which
 # Dovecot runs, for example, vmail
 #
-# 1. avoid processing autoreplies :)
+# TODO: avoid processing autoreplies :)
 #    autoresponder is installed
 #    the user sends another msg (for canceling)
 #    autoresponder replies
 #    this script should not send a HOWTO to this reply
 #
-# TODO: wrap into VacationAutoresponder class?
-# TODO: add 'activate: now' to allowed syntax
+# DONE: add 'activate: now' to allowed syntax
 #       this should also be default for cancel operation
 # TODO: add logging mechanism
 # TODO: how to treat mail coming from illegal users
@@ -26,6 +25,7 @@
 #       that can be defined in vacation_autoresponder.conf
 #       and also via the command line
 # TODO: write Vacation.howto
+# TODO: wrap main logic into VacationAutoresponder class?
 #
 # Examples to try:
 # manage_vacation --show-sieve-script --from=talpus@gmail.com,tux@linguistics.rub.de
@@ -468,6 +468,7 @@ class Vacation
     @deleted = false
     @fake = false
     @debug = false
+    @frozen_variables = {}
 
     if !obj
       # skip
@@ -493,7 +494,6 @@ class Vacation
   end
 
   # TODO: test if works with html
-  # TODO: add 'activate: now'
   def parse_text text
 
     if @debug
@@ -508,10 +508,10 @@ class Vacation
       elsif line =~ /=end/
         @closed = true
         break
-      elsif line =~ /^cancel/
+      elsif line =~ /^(cancel|deactivate)/
         cancel
       elsif line =~ /^activate:\t*(now|jetzt)/
-        raise "ERROR: not supported:\n#{line}"
+        self.activated_at = Time.now - 1, freeze=true
       elsif line =~ /^first (?:day|date):(.+)/
         self.starts_at = $1
       elsif line =~ /^last (?:day|date):(.+)/
@@ -540,12 +540,14 @@ class Vacation
     # Set Autoresponder activation time at 18:00 of the day
     # before user vacation starts.
     # If it happens to be on weekend, move it further to Friday
-    @activated_at = @starts_at.to_time - 6.hours
-    if @activated_at.sunday?
-      @activated_at -= 2.days
-    elsif @activated_at.saturday?
-      @activated_at -= 1.day
+    activated_at = @starts_at.to_time - 6.hours
+    if activated_at.sunday?
+      activated_at -= 2.days
+    elsif activated_at.saturday?
+      activated_at -= 1.day
     end
+
+    self.activated_at = activated_at
 
     @starts_at
   end
@@ -562,7 +564,18 @@ class Vacation
   end
 
   def activated_at= val
-    @activated_at = to_time val
+    if val.is_a? Array
+      # handling case when the method was called as:
+      #  obj.activated_at = Time.now, freeze=true
+      val, freeze = val
+    end
+    if can_change? :activated_at
+      @activated_at = to_time val
+    end
+    if freeze
+      disallow_changing :activated_at
+    end
+    @activated_at
   end
 
   def deactivated_at= val
@@ -648,6 +661,14 @@ class Vacation
 
   private
 
+  def can_change? varname
+    ! @frozen_variables.key?(varname)
+  end
+
+  def disallow_changing varname
+    @frozen_variables[varname] = true
+  end
+
   def closed= v
     @closed = v
     @parsing_message = false  if @closed
@@ -682,6 +703,12 @@ class Vacation
     val.is_a?(Time) ? val : Time.parse(val)
   end
 end
+
+# testing if can disallow re-setting activated_at field
+#v = Vacation.new
+#v.activated_at = Time.now, true
+#v.starts_at = (Time.now + 1.day).to_date
+#puts v.to_s
 
 ######################################################################
 
