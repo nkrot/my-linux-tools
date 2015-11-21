@@ -14,16 +14,15 @@
 #    autoresponder replies
 #    this script should not send a HOWTO to this reply
 #
-# DONE: add 'activate: now' to allowed syntax
-#       this should also be default for cancel operation
 # TODO: add logging mechanism
 # TODO: how to treat mail coming from illegal users
 #       (users from different domains)? Delete?
 #       - Now they are ignored and remain in the mailbox
-# TODO: add --test mode that installs autoresponder
+# DONE: add --test mode that installs autoresponder
 #       only for specific users and only with specific sender addresses
-#       that can be defined in vacation_autoresponder.conf
-#       and also via the command line
+#       - that can be defined in vacation_autoresponder.conf
+#       ? TODO and also via the command line
+#       ? TODO should these limitations be also in vacations.yaml?
 # TODO: write Vacation.howto
 # TODO: wrap main logic into VacationAutoresponder class?
 #
@@ -84,6 +83,8 @@ end
 ######################################################################
 
 class Conf
+  @@test_mode = false
+  @@test_accounts = nil
 
   class << self
 
@@ -93,6 +94,39 @@ class Conf
 
     def from_service
       "#{@@config[:service_name]} <#{@@config[:service_email]}>"
+    end
+
+    def test_mode_on
+      @@test_mode = true
+    end
+
+    def test_mode_on?
+      @@test_mode
+    end
+
+    # USAGE: use this method with Conf.test_mode_on? only
+    def test_accounts
+      if test_mode_on?
+        @@test_accounts ||= Conf.test.map do |v|
+          v.is_a?(Hash) ? v.keys : v
+        end.flatten
+      end
+      @@test_accounts || []
+    end
+
+    # return list of sender emails for which given test account
+    # wants to activate autoresponder
+    # USAGE: use this method with Conf.test_mode_on? only
+    def senders_for_test_account account
+      senders = []
+      if test_mode_on?
+        Conf.test.each do |v|
+          if v.is_a?(Hash) && v.keys.include?(account)
+            senders.concat v[account]
+          end
+        end
+      end
+      senders.empty? ? nil : senders
     end
 
     def method_missing meth, *args
@@ -388,6 +422,12 @@ class VacationsFile
       # delete example entry
       @data.delete_if{ |k,v| v.example? }
 
+      # when in test mode, pick only those entries from the vacations file
+      # that correspond to accounts of interest
+      if Conf.test_mode_on?
+        @data.select!{ |k,v| Conf.test_accounts.include?(v.account_name) }
+      end
+
     else
       @data = Hash.new
     end
@@ -404,6 +444,8 @@ class VacationsFile
     data.merge! Vacation.example_entry_for_config
 
     # add real entries, except those that have been canceled/deactivated
+    # NOTE: in test mode, accounts other that those specified as test
+    # accounts will get lost
     @data.values.each do |vac|
       data.merge!(vac.for_config)  unless vac.canceled?
     end
@@ -886,8 +928,9 @@ class EmailAnalyser
           next
         end
 
-        senders = senders_in_my_domain(msg)
+        # TODO: disregard emails that are autoreplies
 
+        senders = senders_in_my_domain(msg)
         # paranoic on: this situation should not happen
         senders -= my_email_addresses
 
@@ -898,6 +941,13 @@ class EmailAnalyser
 
         unless known_email? senders.first
 #          puts "User email unknown: #{senders.first}"
+          next
+        end
+
+        if Conf.test_mode_on? &&
+           ! Conf.test_accounts.include?(get_account_name(senders.first))
+        then
+#          puts "[TESTMODE] Ignoring sender #{senders.first} that is not in test accounts"
           next
         end
 
@@ -1018,7 +1068,7 @@ class EmailAnalyser
     rcpt_addresses = [:to, :cc].map do |meth|
       msg.send(meth)
     end.flatten.compact.map(&:downcase)
-    !(my_email_addresses - rcpt_addresses).empty?
+    ! (my_email_addresses - rcpt_addresses).empty?
   end
 
   def dovecot_accounts
@@ -1112,8 +1162,15 @@ def install_sieve_script vac
   sieve_vacation_file = Conf.sieve_vacation_file vac.account_name
   verboser "Writing #{sieve_vacation_file} file"
   File.open sieve_vacation_file, "w+" do |file|
-    # TODO: add from: @options[:from_senders] ?
-    file.puts SieveScript.vacation text: vac.message
+    # TODO: handle from: @options[:from_senders] ?
+    params = { text: vac.message }
+    if Conf.test_mode_on?
+      senders = Conf.senders_for_test_account vac.account_name
+      if senders
+        params[:from] = senders
+      end
+    end
+    file.puts SieveScript.vacation params
   end
 
   # amend main.sieve file
@@ -1140,10 +1197,13 @@ def uninstall_sieve_script vac
     File.delete sieve_vacation_file
   end
 
+  #
   # amend main.sieve
+  #
   sieve_main_file = Conf.sieve_main_file vac.account_name
   verboser "Deactivating vacation entry in #{sieve_main_file}"
   lines = IO.readlines sieve_main_file
+
   if SieveScript.deactivate_vacation! lines
     File.open sieve_main_file, "w+" do |file|
       file.puts lines.join("\n")
@@ -1198,6 +1258,14 @@ OPTIONS:
     @options[:conf_file] = val
   end
 
+  opts.on('--test-mode',
+          'run in test mode, limited to a number of account as specified',
+          'in the configuration file under `test:\' keyword.',
+          'To avoid that test mode destroys valid vacations_file it is',
+          'always a good idea to provide a different configuration file.') do
+    Conf.test_mode_on
+  end
+
   opts.on('--show-vacations-example', 'show example of vacations.yaml') do
     puts Vacation.example_entry_for_config.to_yaml
     exit 0
@@ -1212,8 +1280,8 @@ OPTIONS:
 
   @options[:from_senders] = nil
   opts.on('--from=email1,email2',
-          'make sieve script active with specified sender addresses only.',
-          'Especially useful for testing purposes.') do |addresses|
+          '??? make sieve script active with specified sender addresses only.',
+          '??? Especially useful for testing purposes.') do |addresses|
     @options[:from_senders] = addresses.split(",")
   end
 
@@ -1240,20 +1308,33 @@ Mail.defaults do
   delivery_method :smtp, Conf.smtp
 end
 
+#if Conf.test_mode_on?
+#  puts "Running in test mode:"
+#  puts Conf.test.inspect
+#  puts Conf.test_accounts.inspect
+#  (Conf.test_accounts + ["fake"]).each do |acc|
+#    puts "Account '#{acc}' receives from: #{Conf.senders_for_test_account(acc).inspect}"
+#  end
+#  puts "/test mode parameters"
+#end
+
 ######################################################################
 # MAIN
 
 # load vacation requests from vacations.yaml
 vacations = VacationsFile.new Conf.vacations_file
 
-# find new vacation autoresponder requests in the mailbox
-email_analyser = EmailAnalyser.new
+# find new vacation autoresponder requests in the service mailbox
+email_analyser              = EmailAnalyser.new
 email_analyser.account_name = Conf.service_account_name
 email_analyser.maildir_path = Conf.service_mail_dir
-email_analyser.my_domains = Conf.domains
-email_analyser.debug = @options[:debug]
+email_analyser.my_domains   = Conf.domains
+email_analyser.debug        = @options[:debug]
 
 email_analyser.process_emails
+
+#puts "vacation requests found in emails from the following users: " +
+#     email_analyser.vacations.map{ |v| v.account_name }.inspect
 
 # merge vacation requests from the two above sources
 vacations.add email_analyser.vacations
