@@ -1,4 +1,10 @@
 # This is a sample configulation file for the Vacation Autoresponder
+#
+# NOTE: never use the same configuration file for normal and test modes,
+#       as the latter is destructive. At least vacations_file will be
+#       damaged: when the test mode completes, the vacations_file will
+#       contain at most entries for the test accounts
+
 service_name: Vacation Autoresponder
 service_email: vacation@mydomain.com
 
@@ -46,3 +52,16 @@ smtp:
   user_name: vacation
   password: PasswordOfVacation
 
+# when --test-mode is active, the autoresponder works only for accounts listed
+# in test section. Accounts can optionally be complemented with a list of email
+# addresses that will receive autoreplies.
+# For example, in the below configuration:
+# - an autoresponder will be activated for the user tux, that will reply to all
+#   messages sent to tux
+# - an autoresponder will be activated for the user virtualtux, that will reply
+#   to messages coming from brother@gmail.com and sister@gmx.net only
+test:
+ - tux
+ - virtualtux:
+   - brother@gmail.com
+   - sister@gmx.net
