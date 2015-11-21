@@ -1,19 +1,20 @@
 #!/usr/bin/env ruby
 
 # # #
-# gems used:
+# > gem install maildir mail
 #  https://github.com/ktheory/maildir
 #  https://github.com/mikel/mail
 #
 # NOTE: ideally, this script should run as the user under which
-# Dovecot runs, for example, vmail
+# Dovecot runs, for example, vmail. or even root
 #
 # TODO: avoid processing autoreplies :)
 #    autoresponder is installed
 #    the user sends another msg (for canceling)
 #    autoresponder replies
 #    this script should not send a HOWTO to this reply
-#
+# TODO: never install vacation autoresponder to vacation account
+#       It is hardly possible that such request will be sent but...
 # TODO: add logging mechanism
 # TODO: how to treat mail coming from illegal users
 #       (users from different domains)? Delete?
@@ -31,6 +32,7 @@
 
 require 'maildir'
 require 'mail'
+
 require 'yaml'
 require 'time'
 require 'optparse'
@@ -83,7 +85,8 @@ end
 ######################################################################
 
 class Conf
-  @@test_mode = false
+  @@keep_messages = false
+  @@test_mode     = false
   @@test_accounts = nil
 
   class << self
@@ -102,6 +105,14 @@ class Conf
 
     def test_mode_on?
       @@test_mode
+    end
+
+    def keep_messages= val
+      @@keep_messages = val
+    end
+
+    def keep_messages?
+      @@keep_messages
     end
 
     # USAGE: use this method with Conf.test_mode_on? only
@@ -1040,10 +1051,12 @@ class EmailAnalyser
 
         end
 
-        # delete this message
+        # delete this message from the mailbox
         # we dont want to process it next time the script is run
-        #vac.email_file.add_flag("T") # does not delete but merely marks as Trashed
-        vac.email_file.destroy # TODO: yes, uncomment
+        unless Conf.keep_messages?
+          # vac.email_file.add_flag("T") # does not delete but merely marks as Trashed
+          vac.email_file.destroy
+        end
       end
     end
   end
@@ -1265,6 +1278,13 @@ OPTIONS:
           'always a good idea to provide a different configuration file.') do
     Conf.test_mode_on
   end
+
+  opts.on('-k', '--keep-messages', 
+          'do not deleted messages once they were processed.',
+          'This is useful primarily for testing.') do
+    Conf.keep_messages = true
+  end
+
 
   opts.on('--show-vacations-example', 'show example of vacations.yaml') do
     puts Vacation.example_entry_for_config.to_yaml
