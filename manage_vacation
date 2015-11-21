@@ -20,6 +20,7 @@
 # TODO: add logging mechanism
 # TODO: how to treat mail coming from illegal users
 #       (users from different domains)? Delete?
+#       - Now they are ignored and remain in the mailbox
 # TODO: add --test mode that installs autoresponder
 #       only for specific users and only with specific sender addresses
 #       that can be defined in vacation_autoresponder.conf
@@ -199,7 +200,7 @@ class Mailer
       msg = "Dear user,"
       msg << "\nVacation autoresponder has just been activated for you."
       msg << "The following message will be sent:\n#{vac.message}"
-      msg << "\nIt will be deactivated on #{vac.deactivated_at}"
+      msg << "\nVacation autoresponder will be deactivated on #{vac.deactivated_at}"
 
       params = {
         to:       vac.account_email,
@@ -217,6 +218,19 @@ class Mailer
       params = {
         to:       vac.account_email,
         subject: 'Vacation Autoresponder deactivated',
+        body:     msg
+      }
+
+      send_mail params
+    end
+
+    def notify_nothing_to_do vac
+      msg = "Dear user,"
+      msg << "\nNothing needs to be done for your account."
+
+      params = {
+        to:       vac.account_email,
+        subject: 'Vacation Autoresponder unchanged',
         body:     msg
       }
 
@@ -733,6 +747,9 @@ class EmailAnalyser
 
         senders = senders_in_my_domain(msg)
 
+        # paranoic on: this situation should not happen
+        senders -= my_email_addresses
+
         if senders.empty?
 #          puts "Sender not in our domain: #{msg.from}"
           next
@@ -816,6 +833,9 @@ class EmailAnalyser
           ignore_remaining_requests = true
           
           if vac.canceled?
+            # TODO: cancelation happens immediately
+            # perhaps there is no need to send this email to avoid
+            # annoying the users with two emails
             Mailer.notify_vacation_autoresponder_canceled vac
           else
             Mailer.notify_vacation_autoresponder_accepted vac
@@ -845,7 +865,8 @@ class EmailAnalyser
 
   def senders_in_my_domain msg
     # as per RFC, the From field can contain several addresses
-    senders = msg.from.select do |addr|
+    from = msg.from || []
+    senders = from.select do |addr|
       username, domain, other = addr.split '@'
       @my_domains.include?(domain.downcase)
     end
@@ -967,6 +988,8 @@ def install_sieve_script vac
   Mailer.notify_vacation_autoresponder_activated vac
 end
 
+# TODO: ideally, if no responder was active and nothing needs
+# to be deactivated, a different notification should be sent
 def uninstall_sieve_script vac
 
   # delete vacation.sieve
@@ -984,9 +1007,13 @@ def uninstall_sieve_script vac
     File.open sieve_main_file, "w+" do |file|
       file.puts lines.join("\n")
     end
+    Mailer.notify_vacation_autoresponder_deactivated vac
+
+  else
+
+    Mailer.notify_nothing_to_do vac
   end
 
-  Mailer.notify_vacation_autoresponder_deactivated vac
 end
 
 ######################################################################
@@ -1075,7 +1102,7 @@ email_analyser = EmailAnalyser.new
 email_analyser.account_name = Conf.service_account_name
 email_analyser.maildir_path = Conf.service_mail_dir
 email_analyser.my_domains = Conf.domains
-#email_analyser.debug = @options[:debug]
+email_analyser.debug = @options[:debug]
 
 email_analyser.process_emails
 
