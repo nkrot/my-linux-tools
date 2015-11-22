@@ -5,12 +5,9 @@
 #  https://github.com/ktheory/maildir
 #  https://github.com/mikel/mail
 #
-# NOTE: ideally, this script should run as the user under which
-# Dovecot runs, for example, vmail. or even root
-#
-# TODO: add possibility to request current status
-#       or include current status in the message that is sent
-#       alongside with a HOWTO message.
+# TODO: move all messages into templates (slim? haml?)
+# TODO: make dates more human-friendly in notifications that are
+#       sent
 # DONE: avoid processing autoreplies coming to vacation account.
 #       Implemented by avoiding generating autoreplies to
 #       vacation account.
@@ -200,13 +197,43 @@ class Mailer
     end
 
     def send_howto_message vac
+      include_state = true
+
       msg = "Dear User,"
-      msg << "\nYour message does not contain valid activation or cancelation"
-      msg << " instructions. The following errors were encountered:"
+
+      msg << "\n\nYour message does not contain valid Vacation Autoresponder activation or cancelation instructions."
+
+      msg << "\nThe following errors were encountered:"
       vac.errors.each_with_index do |err, i|
         msg << "\n #{i+1}) #{err}"
       end
-      msg << "\n\nTherefore this very HOWTO is sent to you. Enjoy!\n\n" 
+
+      if include_state
+        msg << "\n\n### Current state of Vacation Autoresponder\n\n"
+
+        # TODO: a better way to access already installed Vacation
+        # for the current user?
+        existing_vac = VacationsFile.vacations[vac.account_name]
+
+        if existing_vac
+          if existing_vac.activated?
+            msg << "There is an autoresponder already active for your account that will be "
+          else
+            msg << "An autoresponder will be activated on #{existing_vac.activated_at} and "
+          end
+
+          msg << "deactivated on #{existing_vac.deactivated_at}."
+          msg << "\nThe following message will be sent:\n"
+          msg << vac.message
+          msg << "\n{End of message}"
+
+        else
+          msg << "There are no requests for Vacation Autoresponder from your account"
+        end
+
+      end
+
+      msg << "\n\n### HOWTO\n\n"
       msg << Vacation.howto
 
       params = {
@@ -224,6 +251,9 @@ class Mailer
       msg << " #{vac.account_name}\n"
       msg << "autoresponder will be activated on: #{vac.activated_at}"
       msg << " and deactivated on: #{vac.deactivated_at}"
+      msg << "\nThe following message will be sent:\n"
+      msg << vac.message
+      msg << "\n{End of message}"
 
       params = {
         to:       vac.account_email,
@@ -236,7 +266,7 @@ class Mailer
 
     def notify_vacation_autoresponder_canceled vac
       msg = "Dear User,"
-      msg << "\nVacation Autoresponder will be deactivated for you shortly."
+      msg << "\n\nVacation Autoresponder will be deactivated for you shortly."
 
       params = {
         to:       vac.account_email,
@@ -250,8 +280,10 @@ class Mailer
     def notify_vacation_autoresponder_activated vac
 
       msg = "Dear user,"
-      msg << "\nVacation autoresponder has just been activated for you."
-      msg << "The following message will be sent:\n#{vac.message}"
+      msg << "\n\nVacation autoresponder has just been activated for you. "
+      msg << "The following message will be sent:\n"
+      msg << vac.message
+      msg << "\n{End of message}"
       msg << "\nVacation autoresponder will be deactivated on #{vac.deactivated_at}"
 
       params = {
@@ -265,7 +297,7 @@ class Mailer
 
     def notify_vacation_autoresponder_deactivated vac
       msg = "Dear user,"
-      msg << "\nVacation autoresponder has just been deactivated."
+      msg << "\n\nVacation autoresponder has just been deactivated."
 
       params = {
         to:       vac.account_email,
@@ -278,7 +310,7 @@ class Mailer
 
     def notify_vacation_autoresponder_not_found vac
       msg = "Dear User,"
-      msg << "\nNo active Vacation Autoresponder was found for your account."
+      msg << "\n\nNo active Vacation Autoresponder was found for your account."
 
       params = {
         to:       vac.account_email,
@@ -433,6 +465,11 @@ class VacationsFile
     Vacation.example_entry_for_config.to_yaml
   end
 
+  # TODO: a better solution?
+  def self.vacations
+    @@vacations ||= {}
+  end
+
   def initialize filename
     @filepath = filename
 
@@ -462,6 +499,8 @@ class VacationsFile
     else
       @data = Hash.new
     end
+
+    @@vacations = self
   end
 
   def method_missing meth, *args
