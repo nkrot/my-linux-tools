@@ -916,29 +916,18 @@ end
 ######################################################################
 
 class EmailAnalyser
-  attr_accessor :account_name
   attr_accessor :debug
 
   def initialize
-    @maildir_path = nil
+    self.maildir_path = Conf.service_mail_dir
     @maildir = nil
-    @mydomains = []
     @vacations = []
 
     @debug = false
   end
 
-  def maildir_path= path
-    if File.directory? path
-      @maildir_path = path
-    else
-      $stderr.puts "ERROR: Maildir not found: #{path}"
-      exit 1
-    end
-  end
-
-  def my_domains= domains
-    @my_domains = domains.dup
+  def my_domains
+    @my_domains ||= Conf.domains.dup
   end
 
   def maildir
@@ -1100,12 +1089,21 @@ class EmailAnalyser
     end
   end
 
+  def maildir_path= path
+    if File.directory? path
+      @maildir_path = path
+    else
+      $stderr.puts "ERROR: Maildir not found: #{path}"
+      exit 1
+    end
+  end
+
   def senders_in_my_domain msg
     # as per RFC, the From field can contain several addresses
     from = msg.from || []
     senders = from.select do |addr|
       username, domain, other = addr.split '@'
-      @my_domains.include?(domain.downcase)
+      my_domains.include?(domain.downcase)
     end
     senders
   end
@@ -1378,11 +1376,8 @@ end
 vacations = VacationsFile.new Conf.vacations_file
 
 # find new vacation autoresponder requests in the service mailbox
-email_analyser              = EmailAnalyser.new
-#email_analyser.account_name = Conf.service_account_name
-email_analyser.maildir_path = Conf.service_mail_dir
-email_analyser.my_domains   = Conf.domains
-email_analyser.debug        = @options[:debug]
+email_analyser       = EmailAnalyser.new
+email_analyser.debug = @options[:debug]
 
 email_analyser.process_emails
 
