@@ -385,27 +385,35 @@ class SieveScript
       lines << 'if header :matches "Subject" "*" { set "originalSubject" ": ${1}"; }'
       lines << ""
 
-      indent = ""
+      # we do not want to auto-reply to the messages that Autoresponder
+      # sends us. To archieve this, install additional intercepting rule
+      from = header_from Conf.service_email_addresses
+      lines << "if anyof (#{from}) { keep; }\n"
+
+      #
+      # vacation rule
+      #
       if args.key? :from
-        from = [ args[:from] ].flatten(1).map do |addr|
-          "header :contains \"from\" \"#{addr}\""
-        end.join(", ")
-        lines << "if anyof (#{from}) {"
-        indent = "    "
+        lines << "elsif anyof (#{header_from(args[:from])}) {"
+      else
+        lines << "else {"
       end
 
       subject = '[Autoreply] Out of office\${originalSubject}'
 
-      lines << indent + "vacation"
-      lines << indent + "  :days 1"
-      lines << indent + "  :subject \"#{subject}\""
-      lines << indent + "  text:\n#{args[:text]}\n.\n;"
-
-      if args.key? :from
-        lines << "}"
-      end
+      lines << "vacation :days 1"
+      lines << "         :subject \"#{subject}\""
+      lines << "         text:\n#{args[:text]}\n.\n;\n}"
 
       lines.join("\n")
+    end
+
+    def header_from addr
+      if addr.respond_to? :map
+        addr.map{ |item| header_from item }.join(", ")
+      else
+        "header :contains \"from\" \"#{addr}\""
+      end
     end
   end
 end
