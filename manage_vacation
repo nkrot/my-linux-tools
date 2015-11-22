@@ -625,7 +625,7 @@ containing the word
 
 ## BUG REPORTS
 
-Send bugreports and suggestions for impovement to:
+Send bugreports and suggestions for improvement to:
 
    Mikalai Krot <talpus@gmail.com> or <krot@linguistics.rub.de>
 
@@ -699,9 +699,9 @@ Send bugreports and suggestions for impovement to:
         cancel
       elsif line =~ /^activate:\s*(now|jetzt)/i
         self.activated_at = Time.now - 1, freeze=true
-      elsif line =~ /^first (?:day|date):(.+)/i
+      elsif line =~ /^(?:first|start) (?:day|date):(.+)/i
         self.starts_at = $1
-      elsif line =~ /^last (?:day|date):(.+)/i
+      elsif line =~ /^(?:last|end) (?:day|date):(.+)/i
         self.ends_at = $1
       elsif line =~ /^message:(.*)/i
         @message = $1.strip
@@ -906,10 +906,10 @@ Send bugreports and suggestions for impovement to:
 
       else
         unless self.starts_at
-          @errors << "Request must contain the first date of vacation"
+          @errors << "Request must specify the first day of vacation"
         end
         unless self.ends_at
-          @errors << "Request must contain the last date of vacation"
+          @errors << "Request must specify the last day of vacation"
         end
       end
     end
