@@ -17,10 +17,10 @@
 # TODO: how to treat mail coming from illegal users
 #       (users from different domains)? Delete?
 #       - Now they are ignored and remain in the mailbox
-# DONE: add --test mode that installs autoresponder
+# DONE: add --test-mode that installs autoresponder
 #       only for specific users and only with specific sender addresses
 #       - that can be defined in vacation_autoresponder.conf
-#       ? TODO and also via the command line
+#       ? TODO and also via the command line?
 #       ? TODO should these limitations be also in vacations.yaml?
 # TODO: write Vacation.howto
 # TODO: wrap main logic into VacationAutoresponder class?
@@ -1410,8 +1410,8 @@ vacations.each do |vac|
     install_sieve_script vac
     vac.activate
 
-  elsif vac.activated_at.in_the_future?
-    verboser "Skipping #{vac.account_name}. Activation is still in the future"
+#  elsif vac.activated_at.in_the_future?
+#    verboser "Skipping #{vac.account_name}. Activation is still in the future"
 
   end
 end
