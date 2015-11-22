@@ -90,6 +90,15 @@ class Conf
   @@test_accounts = nil
 
   class << self
+    def method_missing meth, *args
+      @@config[meth.to_sym]
+    end
+
+    def service_email_addresses
+      @@service_email_addresses ||= domains.map do |domain|
+        [service_account_name, domain].join("@")
+      end
+    end
 
     def file= path
       @@config = YAML.load_file(path).symbolize_keys
@@ -138,10 +147,6 @@ class Conf
         end
       end
       senders.empty? ? nil : senders
-    end
-
-    def method_missing meth, *args
-      @@config[meth.to_sym]
     end
 
     # TODO: maybe somewhere under /var/ ?
@@ -943,7 +948,7 @@ class EmailAnalyser
 
         senders = senders_in_my_domain(msg)
         # paranoic on: this situation should not happen
-        senders -= my_email_addresses
+        senders -= Conf.service_email_addresses
 
         if senders.empty?
 #          puts "Sender not in our domain: #{msg.from}"
@@ -1061,12 +1066,6 @@ class EmailAnalyser
     end
   end
 
-  def my_email_addresses
-    @my_email_addresses ||= @my_domains.map do |domain| 
-      [@account_name, domain].join("@")
-    end
-  end
-
   def senders_in_my_domain msg
     # as per RFC, the From field can contain several addresses
     from = msg.from || []
@@ -1081,7 +1080,7 @@ class EmailAnalyser
     rcpt_addresses = [:to, :cc].map do |meth|
       msg.send(meth)
     end.flatten.compact.map(&:downcase)
-    ! (my_email_addresses - rcpt_addresses).empty?
+    ! (Conf.service_email_addresses - rcpt_addresses).empty?
   end
 
   def dovecot_accounts
@@ -1313,6 +1312,8 @@ OPTIONS:
   opts.separator " "
 end.parse!
 
+Conf.file = @options[:conf_file]
+
 if @options[:show_sieve_script]
   params = { text: 'I am on vacation' }
   if @options[:from_senders]
@@ -1321,8 +1322,6 @@ if @options[:show_sieve_script]
   puts SieveScript.vacation params
   exit 0
 end
-
-Conf.file = @options[:conf_file]
 
 Mail.defaults do
   delivery_method :smtp, Conf.smtp
@@ -1346,7 +1345,7 @@ vacations = VacationsFile.new Conf.vacations_file
 
 # find new vacation autoresponder requests in the service mailbox
 email_analyser              = EmailAnalyser.new
-email_analyser.account_name = Conf.service_account_name
+#email_analyser.account_name = Conf.service_account_name
 email_analyser.maildir_path = Conf.service_mail_dir
 email_analyser.my_domains   = Conf.domains
 email_analyser.debug        = @options[:debug]
