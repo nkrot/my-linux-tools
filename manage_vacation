@@ -11,8 +11,8 @@
 # DONE: avoid processing autoreplies coming to vacation account.
 #       Implemented by avoiding generating autoreplies to
 #       vacation account.
-# TODO: never install vacation autoresponder to vacation account
-#       It is hardly possible that such request will be sent but...
+# DONE: never install vacation autoresponder to vacation account
+#       It is hardly possible that such request will be sent but.
 # TODO: add logging mechanism
 # TODO: how to treat mail coming from illegal users
 #       (users from different domains)? Delete?
@@ -443,6 +443,11 @@ class VacationsFile
 
       # delete example entry
       @data.delete_if{ |k,v| v.example? }
+
+      # paranoic mode on:
+      # ignore service account of Autoresponder. There is no legal
+      # scenario how it could have gotten into vacations_file but...
+      @data.delete_if{ |k,v| v.account_name == Conf.service_account_name }
 
       # when in test mode, pick only those entries from the vacations file
       # that correspond to accounts of interest
@@ -953,7 +958,10 @@ class EmailAnalyser
         # TODO: disregard emails that are autoreplies
 
         senders = senders_in_my_domain(msg)
-        # paranoic on: this situation should not happen
+
+        # paranoic mode on:
+        # ignore vacation requests coming from Vacation Autoresponder
+        # service. This situation is unreal but... paranoia
         senders -= Conf.service_email_addresses
 
         if senders.empty?
