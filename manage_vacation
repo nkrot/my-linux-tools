@@ -272,13 +272,13 @@ class Mailer
       send_mail params
     end
 
-    def notify_nothing_to_do vac
-      msg = "Dear user,"
-      msg << "\nNothing needs to be done for your account."
+    def notify_vacation_autoresponder_not_found vac
+      msg = "Dear User,"
+      msg << "\nNo active Vacation Autoresponder was found for your account."
 
       params = {
         to:       vac.account_email,
-        subject: 'Vacation Autoresponder unchanged',
+        subject: 'Vacation Autoresponder not active',
         body:     msg
       }
 
@@ -1226,8 +1226,6 @@ def install_sieve_script vac
       file.puts lines.join("\n")
     end
   end
-
-  Mailer.notify_vacation_autoresponder_activated vac
 end
 
 def uninstall_sieve_script vac
@@ -1253,12 +1251,7 @@ def uninstall_sieve_script vac
       File.open sieve_main_file, "w+" do |file|
         file.puts lines.join("\n")
       end
-      Mailer.notify_vacation_autoresponder_deactivated vac
     end
-  end
-
-  unless changed
-    Mailer.notify_nothing_to_do vac
   end
 
 end
@@ -1380,7 +1373,6 @@ vacations = VacationsFile.new Conf.vacations_file
 # find new vacation autoresponder requests in the service mailbox
 email_analyser       = EmailAnalyser.new
 email_analyser.debug = @options[:debug]
-
 email_analyser.process_emails
 
 #puts "vacation requests found in emails from the following users: " +
@@ -1399,13 +1391,23 @@ vacations.each do |vac|
 
   if vac.deactivated_at.in_the_past?
     verboser "Deactivating autoresponder for #{vac.account_name}"
+
     uninstall_sieve_script vac
-    vac.cancel  # will delete this entry from vacations.yaml
+    vac.cancel
+
+    if vac.activated?
+      Mailer.notify_vacation_autoresponder_deactivated vac
+    else
+      Mailer.notify_vacation_autoresponder_not_found vac
+    end
 
   elsif !vac.activated? && vac.activated_at.in_the_past?
     verboser "Activating autoresponder for #{vac.account_name}"
+
     install_sieve_script vac
     vac.activate
+
+    Mailer.notify_vacation_autoresponder_activated vac
 
 #  elsif vac.activated_at.in_the_future?
 #    verboser "Skipping #{vac.account_name}. Activation is still in the future"
