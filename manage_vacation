@@ -567,7 +567,7 @@ The message text can span over various lines:
    I am on vacation and therefore can not answer your email immediately.
    Please excuse. Better, try finding the answer to your question yourself.
    Sincerely yours,
-   Sinsereli Yohrs
+   Sinsere Lee Yohrs
 
 If no message is specified, the default one will be sent:
 
@@ -592,7 +592,7 @@ is a valid example:
 
    Have nice holidays too.
    Best regards,
-   Sins Yohrs
+   Sinsere Lee Yohrs
 
 In the above example, only the lines marked with ** will be used by
 the Autoresponder.
