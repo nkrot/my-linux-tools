@@ -8,11 +8,9 @@
 # NOTE: ideally, this script should run as the user under which
 # Dovecot runs, for example, vmail. or even root
 #
-# TODO: avoid processing autoreplies :)
-#    autoresponder is installed
-#    the user sends another msg (for canceling)
-#    autoresponder replies
-#    this script should not send a HOWTO to this reply
+# DONE: avoid processing autoreplies coming to vacation account.
+#       Implemented by avoiding generating autoreplies to
+#       vacation account.
 # TODO: never install vacation autoresponder to vacation account
 #       It is hardly possible that such request will be sent but...
 # TODO: add logging mechanism
@@ -385,8 +383,8 @@ class SieveScript
       lines << 'if header :matches "Subject" "*" { set "originalSubject" ": ${1}"; }'
       lines << ""
 
-      # we do not want to auto-reply to the messages that Autoresponder
-      # sends us. To archieve this, install additional intercepting rule
+      # We do not want to auto-reply to the messages that activated
+      # Autoresponder sends us.
       from = header_from Conf.service_email_addresses
       lines << "if anyof (#{from}) { keep; }\n"
 
