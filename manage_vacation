@@ -8,11 +8,15 @@
 # NOTE: ideally, this script should run as the user under which
 # Dovecot runs, for example, vmail. or even root
 #
+# TODO: add possibility to request current status
+#       or include current status in the message that is sent
+#       alongside with a HOWTO message.
 # DONE: avoid processing autoreplies coming to vacation account.
 #       Implemented by avoiding generating autoreplies to
 #       vacation account.
 # DONE: never install vacation autoresponder to vacation account
-#       It is hardly possible that such request will be sent but.
+#       It is hardly possible that such request will be sent but
+#       it is good to be on a safe side.
 # TODO: add logging mechanism
 # TODO: how to treat mail coming from illegal users
 #       (users from different domains)? Delete?
@@ -730,6 +734,10 @@ Send bugreports and suggestions for impovement to:
     elsif activated_at.saturday?
       activated_at -= 1.day
     end
+    # Anyway, activation time far in the past does not make sense
+    if activated_at.in_the_past?
+      activated_at = Time.now - 1
+    end
 
     self.activated_at = activated_at
 
@@ -744,6 +752,11 @@ Send bugreports and suggestions for impovement to:
     # day of the user's vacation
     # NOTE: described in Vacation.howto, keep in sync
     @deactivated_at = @ends_at.to_time + 18.hours
+    # we can not travel to the past, instead fix time to now
+    # if it happens to be in the past
+    if @deactivated_at.in_the_past?
+      @deactivated_at = Time.now - 1
+    end
 
     @ends_at
   end
