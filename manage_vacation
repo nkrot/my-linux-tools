@@ -1230,8 +1230,6 @@ def install_sieve_script vac
   Mailer.notify_vacation_autoresponder_activated vac
 end
 
-# TODO: ideally, if no responder was active and nothing needs
-# to be deactivated, a different notification should be sent
 def uninstall_sieve_script vac
 
   # delete vacation.sieve
@@ -1246,16 +1244,20 @@ def uninstall_sieve_script vac
   #
   sieve_main_file = Conf.sieve_main_file vac.account_name
   verboser "Deactivating vacation entry in #{sieve_main_file}"
-  lines = IO.readlines sieve_main_file
 
-  if SieveScript.deactivate_vacation! lines
-    File.open sieve_main_file, "w+" do |file|
-      file.puts lines.join("\n")
+  if File.exist? sieve_main_file
+    lines = IO.readlines sieve_main_file
+
+    changed = SieveScript.deactivate_vacation! lines
+    if changed
+      File.open sieve_main_file, "w+" do |file|
+        file.puts lines.join("\n")
+      end
+      Mailer.notify_vacation_autoresponder_deactivated vac
     end
-    Mailer.notify_vacation_autoresponder_deactivated vac
+  end
 
-  else
-
+  unless changed
     Mailer.notify_nothing_to_do vac
   end
 
