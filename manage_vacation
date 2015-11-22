@@ -646,6 +646,7 @@ Send bugreports and suggestions for impovement to:
     @parsing_message = false
     @errors = []
     @deleted = false
+    @activated = false
     @fake = false
     @debug = false
     @frozen_variables = {}
@@ -669,6 +670,7 @@ Send bugreports and suggestions for impovement to:
     self.activated_at   = hash["activation_time"]
     self.deactivated_at = hash["deactivation_time"]
     self.message        = hash["message"]
+    self.activated      = hash["activated"]
 
     @fake = self.account_email == "john.smith@example.com"
   end
@@ -794,6 +796,14 @@ Send bugreports and suggestions for impovement to:
     @canceled
   end
 
+  def activated?
+    @activated
+  end
+
+  def activate
+    @activated = true
+  end
+
   def valid_request?
     @errors.empty?
   end
@@ -815,6 +825,7 @@ Send bugreports and suggestions for impovement to:
       out << "till: #{ends_at}"
       out << "message:\n#{message}\nend_of_message"
       out << "*requested at: #{requested_at}"
+      out << "*activated: #{activated?}"
       out << "*activated_at: #{activated_at}"
       out << "*deactivated_at: #{deactivated_at}"
       out << "*email path: #{email_file ? email_file.path : nil}"
@@ -833,6 +844,7 @@ Send bugreports and suggestions for impovement to:
     {
       account_name => {
         "email"             => account_email,
+        "activated"         => activated?,
         "activation_time"   => activated_at   ?
                                  activated_at.strftime(fmt)   : nil,
         "deactivation_time" => deactivated_at ?
@@ -843,6 +855,14 @@ Send bugreports and suggestions for impovement to:
   end
 
   private
+
+  def activated= val
+    @activated = to_boolean val
+  end
+
+  def to_boolean val
+    ["yes", "true"].include?(val.to_s.downcase)
+  end
 
   def can_change? varname
     ! @frozen_variables.key?(varname)
@@ -1385,9 +1405,10 @@ vacations.each do |vac|
     uninstall_sieve_script vac
     vac.cancel  # will delete this entry from vacations.yaml
 
-  elsif vac.activated_at.in_the_past?
+  elsif !vac.activated? && vac.activated_at.in_the_past?
     verboser "Activating autoresponder for #{vac.account_name}"
     install_sieve_script vac
+    vac.activate
 
   elsif vac.activated_at.in_the_future?
     verboser "Skipping #{vac.account_name}. Activation is still in the future"
