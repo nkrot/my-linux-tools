@@ -224,7 +224,7 @@ class Mailer
 
           msg << "deactivated on #{existing_vac.deactivated_at}."
           msg << "\nThe following message will be sent:\n"
-          msg << vac.message
+          msg << existing_vac.message
           msg << "\n{End of message}"
 
         else
