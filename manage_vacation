@@ -255,7 +255,8 @@ class Mailer
       msg << " #{vac.account_name}\n"
       msg << "autoresponder will be activated on: #{vac.activated_at}"
       msg << " and deactivated on: #{vac.deactivated_at}"
-      msg << "\nThe following message will be sent:\n"
+      msg << "\nThe following message will be sent:"
+      msg << "\n{Beginning of message}\n"
       msg << vac.message
       msg << "\n{End of message}"
 
@@ -285,7 +286,8 @@ class Mailer
 
       msg = "Dear user,"
       msg << "\n\nVacation autoresponder has just been activated for you. "
-      msg << "The following message will be sent:\n"
+      msg << "The following message will be sent:"
+      msg << "\n{Beginning of message}\n"
       msg << vac.message
       msg << "\n{End of message}"
       msg << "\nVacation autoresponder will be deactivated on #{vac.deactivated_at}"
