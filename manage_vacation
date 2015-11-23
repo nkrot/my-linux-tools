@@ -8,23 +8,24 @@
 # TODO: move all messages into templates (slim? haml?)
 # TODO: make dates more human-friendly in notifications that are
 #       sent
+# TODO: add logging mechanism
+# TODO: how to treat mail coming from illegal users
+#       (users from different domains)? Delete?
+#       - Now they are ignored and remain in the mailbox
+# TODO: write Vacation.howto
+# TODO: wrap main logic into VacationAutoresponder class?
+#
 # DONE: avoid processing autoreplies coming to vacation account.
 #       Implemented by avoiding generating autoreplies to
 #       vacation account.
 # DONE: never install vacation autoresponder to vacation account
 #       It is hardly possible that such request will be sent but
 #       it is good to be on a safe side.
-# TODO: add logging mechanism
-# TODO: how to treat mail coming from illegal users
-#       (users from different domains)? Delete?
-#       - Now they are ignored and remain in the mailbox
 # DONE: add --test-mode that installs autoresponder
 #       only for specific users and only with specific sender addresses
 #       - that can be defined in vacation_autoresponder.conf
 #       ? TODO and also via the command line?
 #       ? TODO should these limitations be also in vacations.yaml?
-# TODO: write Vacation.howto
-# TODO: wrap main logic into VacationAutoresponder class?
 #
 # Examples to try:
 # manage_vacation --show-sieve-script --from=talpus@gmail.com,tux@linguistics.rub.de
@@ -223,7 +224,8 @@ class Mailer
           end
 
           msg << "deactivated on #{existing_vac.deactivated_at}."
-          msg << "\nThe following message will be sent:\n"
+          msg << "\nThe following message is sent:"
+          msg << "\n{Beginning of message}\n"
           msg << existing_vac.message
           msg << "\n{End of message}"
 
@@ -554,8 +556,8 @@ class Vacation
   attr_accessor :closed
 
   def self.howto
-    # TODO: get rid of this hardcode. Note Conf.service_email is not
-    # yet accessible at this point.
+    # TODO: get rid of this hardcode. Note Conf.service_email_addresses
+    # may not be yet accessible at this point.
     service_email = "vacation@linguistics.rub.de"
 
     outs = []
@@ -1415,6 +1417,7 @@ end
 #  end
 #  puts "/test mode parameters"
 #end
+#exit 100
 
 ######################################################################
 # MAIN
