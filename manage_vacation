@@ -95,9 +95,11 @@ class Conf
     end
 
     def service_email_addresses
-      @@service_email_addresses ||= domains.map do |domain|
-        [service_account_name, domain].join("@")
-      end
+      @@service_email_addresses ||= email_addresses_of service_account_name
+    end
+
+    def email_addresses_of account
+      domains.map{ |domain| [account, domain].join("@") }
     end
 
     def file= path
@@ -439,6 +441,10 @@ class SieveScript
 
       lines << "vacation :days 1"
       lines << "         :subject \"#{subject}\""
+      if args.key? :addresses
+        addresses = args[:addresses].map{ |addr| "\"#{addr}\"" }.join(", ")
+        lines << "         :addresses [#{addresses}]"
+      end
       lines << "         text:\n#{args[:text]}\n.\n;\n}"
 
       lines.join("\n")
@@ -1261,7 +1267,10 @@ def install_sieve_script vac
   verboser "Writing #{sieve_vacation_file} file"
   File.open sieve_vacation_file, "w+" do |file|
     # TODO: handle from: @options[:from_senders] ?
-    params = { text: vac.message }
+    params = {
+      text:      vac.message,
+      addresses: Conf.email_addresses_of(vac.account_name)
+    }
     if Conf.test_mode_on?
       senders = Conf.senders_for_test_account vac.account_name
       if senders
@@ -1396,7 +1405,10 @@ end.parse!
 Conf.file = @options[:conf_file]
 
 if @options[:show_sieve_script]
-  params = { text: 'I am on vacation' }
+  params = {
+    text:      'I am on vacation',
+    addresses: Conf.email_addresses_of(ENV['USER'])
+  }
   if @options[:from_senders]
     params[:from] = @options[:from_senders]
   end
