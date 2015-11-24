@@ -441,7 +441,8 @@ class SieveScript
 
       subject = '[Autoreply] Out of office\${originalSubject}'
 
-      lines << "vacation :days 1"
+      lines << "vacation"
+      #lines << "  :days 1" # use default value from Dovecot config
       lines << "         :subject \"#{subject}\""
       if args.key? :addresses
         addresses = args[:addresses].map{ |addr| "\"#{addr}\"" }.join(", ")
