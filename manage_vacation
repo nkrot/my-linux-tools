@@ -12,15 +12,18 @@
 # TODO: how to treat mail coming from illegal users
 #       (users from different domains)? Delete?
 #       - Now they are ignored and remain in the mailbox
-# TODO: write Vacation.howto
+# TODO: update Vacation.howto
 # TODO: wrap main logic into VacationAutoresponder class?
+# TODO: make it into a gem?
 #
 # DONE: avoid processing autoreplies coming to vacation account.
 #       Implemented by avoiding generating autoreplies to
 #       vacation account.
+#       Add this to HOWTO
 # DONE: never install vacation autoresponder to vacation account
 #       It is hardly possible that such request will be sent but
 #       it is good to be on a safe side.
+#       Add this to HOWTO
 # DONE: add --test-mode that installs autoresponder
 #       only for specific users and only with specific sender addresses
 #       - that can be defined in vacation_autoresponder.conf
@@ -28,7 +31,10 @@
 #       ? TODO should these limitations be also in vacations.yaml?
 #
 # Examples to try:
-# manage_vacation --show-sieve-script --from=talpus@gmail.com,tux@linguistics.rub.de
+# manage_vacation --show-sieve-script 
+#                 --from=talpus@gmail.com,tux@linguistics.rub.de
+#                 --conf path/to/configuration_file
+#
 
 require 'maildir'
 require 'mail'
@@ -594,10 +600,6 @@ processed, depending on how corresponding cron job is configured. Be patient.
 Plain text emails are preferred. Html emails were not tested. Configure your
 mailer to include plain text when sending to this account
 
-TODO:
-- How emails are filtered to avoid unauthorized use
-- How it work with mailing lists
-
 ## HOW TO ACTIVATE AUTORESPONDER
 
 To activate the Autoresponder, the user should send an email containing
@@ -712,6 +714,16 @@ please be patient and report a problem to #{postmaster_email}.
   This notification additionally includes information on the current state
   of the Vacation Autoresponder for the user account.
 
+## GORY DETAILS (DEVS AND ADMINS ONLY)
+
+TODO:
+
+- How to install the service
+- How emails are filtered to avoid unauthorized use
+- How it works with mailing lists - correctly ignores
+- How it works with group emails - not implemented yet, planned: should
+  respond to the sender (only).
+
 ## BUG REPORTS
 
 Send bugreports and suggestions for improvement to:
@@ -727,31 +739,31 @@ Send bugreports and suggestions for improvement to:
 
     obj.account_name  = "johnsmith"
     obj.account_email = "john.smith@example.com"
-    obj.starts_at = "13.1.2016"
-    obj.ends_at = "29.1.2016"
-    obj.message = "Example: I am on vacation from #{obj.starts_at} till #{obj.ends_at}."
+    obj.starts_at     = "13.1.2016"
+    obj.ends_at       = "29.1.2016"
+    obj.message       = "Example: I am on vacation from #{obj.starts_at} till #{obj.ends_at}."
 
     obj.for_config
   end
 
   def initialize obj=nil
-    @closed = false
-    @parsing_message = false
-    @errors = []
-    @deleted = false
-    @activated = false
-    @fake = false
-    @debug = false
+    @closed           = false
+    @parsing_message  = false
+    @deleted          = false
+    @activated        = false
+    @fake             = false
+    @debug            = false
+    @errors           = []
     @frozen_variables = {}
 
-    if !obj
+    if ! obj
       # skip
     elsif obj.is_a? String
       parse_text obj
     elsif obj.is_a? Hash
       parse_hash obj
     elsif obj.is_a? self.class
-      # TODO: make a deep copy
+      # TODO: make a deep copy. will do it when needed :)
     else
       raise "ERROR: Invalid data type #{obj.class} of:\n#{obj}"
     end
@@ -841,7 +853,7 @@ Send bugreports and suggestions for improvement to:
     # day of the user's vacation
     # NOTE: described in Vacation.howto, keep in sync
     @deactivated_at = @ends_at.to_time + 18.hours
-    # we can not travel to the past, instead fix time to now
+    # we can not travel to the past, instead fix time to be now
     # if it happens to be in the past
     if @deactivated_at.in_the_past?
       @deactivated_at = Time.now - 1
@@ -981,7 +993,7 @@ Send bugreports and suggestions for improvement to:
 
   def validate
     if canceled?
-      # nothing to check
+      # all is fine, nothing to check
 
     else
       # check dates specified by the user
