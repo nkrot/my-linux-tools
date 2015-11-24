@@ -251,7 +251,7 @@ class Mailer
 
     def notify_vacation_autoresponder_accepted vac
 
-      msg = "Vacation request accepted for the user"
+      msg = "Vacation Autoresponder request accepted for the user"
       msg << " #{vac.account_name}\n"
       msg << "autoresponder will be activated on: #{vac.activated_at}"
       msg << " and deactivated on: #{vac.deactivated_at}"
@@ -262,7 +262,7 @@ class Mailer
 
       params = {
         to:       vac.account_email,
-        subject: 'Vacation request accepted',
+        subject: 'Vacation Activation request accepted',
         body:     msg
       }
 
@@ -567,7 +567,9 @@ class Vacation
   def self.howto
     # TODO: get rid of this hardcode. Note Conf.service_email_addresses
     # may not be yet accessible at this point.
-    service_email = "vacation@linguistics.rub.de"
+    # TODO: the HOWTO contains my hardcoded addresses
+    service_email    = "vacation@linguistics.rub.de"
+    postmaster_email = "postmaster@linguistics.rub.de"
 
     outs = []
 
@@ -649,11 +651,13 @@ is a valid example:
    Sinsere Lee Yohrs
 
 In the above example, only the lines marked with ** will be used by
-the Autoresponder.
+the Autoresponder. Without =end keyword, the message will be the full
+chunk of text starting form message: and upto the end of the email.
 
-By default the Autoresponder is activated at 18:00 on the day before
+By default the Autoresponder is activated at 18:00 on the day *before*
 the vacation starts as specified by 'first day' keyword. If the scheduled
-day of activation happens to be Saturday or Sunday, it is shifted to Friday.
+day of activation happens to be Saturday or Sunday, it is shifted back
+further to Friday, 18:00.
 
 There is only one possibility to override the default activation time,
 namely by including 'activate: now' stanza. For example
@@ -662,6 +666,8 @@ namely by including 'activate: now' stanza. For example
    last day: 14.01.2016
    activate: now
    message: ....
+
+The Autoresponder will become effective as soon as the request is processed.
 
 ## HOW TO DEACTIVATE AUTORESPONDER
 
@@ -672,6 +678,39 @@ However, the Autoresponder can be deactivated at any time by sending an email
 containing the word
 
   cancel
+
+## NOTIFICATIONS
+
+The Service sends a number of (sometimes annoying) notifications. However,
+the lack of appropriate notification can be a signal of a problem, therefore,
+please be patient and report a problem to #{postmaster_email}.
+
+1. Vacation Activation request accepted
+
+  The notification is sent shortly after the user has sent a valid request
+  to the service email.
+  If the request is not valid, the HOWTO message is sent instead.
+
+2. Vacation Cancelation request accepted
+
+  This notification is sent shortly after the user has sent cancelation request.
+  If the request is not valid, a HOWTO message is sent instead.
+
+3. Vacation Autoresponder activated
+
+  This notification is sent after the autoresponder has become effective.
+
+4. Vacation Autoresponder deactivated
+
+  This notification is sent after the autoresponder has been switched off.
+
+5. Vacation Autoresponder HOWTO
+
+  This notification is sent if the user sends an empty email or any other
+  email that is not a valid Vacation Activation/Cancelation request.
+
+  This notification additionally includes information on the current state
+  of the Vacation Autoresponder for the user account.
 
 ## BUG REPORTS
 
