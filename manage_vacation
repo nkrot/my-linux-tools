@@ -232,7 +232,7 @@ class Mailer
           msg << "\n{End of message}"
 
         else
-          msg << "There are no requests for Vacation Autoresponder from your account"
+          msg << "There have been no requests for Vacation Autoresponder from your account"
         end
 
       end
