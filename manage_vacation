@@ -91,9 +91,11 @@ end
 ######################################################################
 
 class Conf
-  @@keep_messages = false
-  @@test_mode     = false
-  @@test_accounts = nil
+  @@keep_messages  = false
+  @@test_mode      = false
+  @@test_accounts  = nil
+  @@account_emails = {}
+  @@account_groups = nil
 
   class << self
     def method_missing meth, *args
@@ -105,7 +107,20 @@ class Conf
     end
 
     def email_addresses_of account
-      domains.map{ |domain| [account, domain].join("@") }
+      unless @@account_emails.key? account
+        accounts = [ account ]
+        if Conf.autoreply_if_received_to_group_alias
+          load_virtual_alias_maps
+          accounts.concat @@account_groups[account] || []
+        end
+        @@account_emails[account] = accounts.map do |acc|
+          domains.map do |domain|
+            [acc, domain].join("@")
+          end
+        end.flatten
+      end
+
+      @@account_emails[account]
     end
 
     def file= path
@@ -190,6 +205,41 @@ class Conf
 
     def sieve_active_file account
       File.join mail_home(account), @@config[:sieve_active_file] # .dovecot.sieve
+    end
+
+    def load_virtual_alias_maps
+      return  if @@account_groups
+
+      fname = @@config[:virtual_alias_maps_file]
+      unless File.exists? fname
+        raise "File not found: #{fname}"
+      end
+
+      @@account_groups = {}
+
+      grpname = nil
+      File.open(fname).each do |line|
+        line.sub! /\s+#.+$/, ""
+        line.downcase!
+
+        next  if line =~ /^#/
+
+        if line =~ /^(\S+)(\s.*)/
+          lhs, line = $1.strip, $2
+          name, domain = lhs.split '@'
+          grpname = domains.include?(domain) ? name : nil
+        end
+
+        if grpname && line =~ /\s+(.+)/
+          rhs = $1
+          rhs.strip.downcase.split(/[\s,;]+/).each do |addr|
+            name, domain = addr.split '@'
+            if domains.include? domain
+              (@@account_groups[name] ||= []) << grpname
+            end
+          end
+        end
+      end
     end
   end
 end
@@ -1477,17 +1527,6 @@ end
 Mail.defaults do
   delivery_method :smtp, Conf.smtp
 end
-
-#if Conf.test_mode_on?
-#  puts "Running in test mode:"
-#  puts Conf.test.inspect
-#  puts Conf.test_accounts.inspect
-#  (Conf.test_accounts + ["fake"]).each do |acc|
-#    puts "Account '#{acc}' receives from: #{Conf.senders_for_test_account(acc).inspect}"
-#  end
-#  puts "/test mode parameters"
-#end
-#exit 100
 
 ######################################################################
 # MAIN

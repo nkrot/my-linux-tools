@@ -31,6 +31,14 @@ mailboxes_dir: /var/vmail/
 # - if a user is known under various names
 dovecot_users_file: /etc/dovecot/users
 
+# If set to true, vacation autoresponder will also react to emails
+# that are sent to group aliases (defined in virtual_alias_maps_file).
+# Note that the reply is sent to the sender, not to the group.
+autoreply_if_received_to_group_alias: true
+# Learn groups to which the account belongs from this file
+# Only entities belonging to the above specified domains are taken.
+virtual_alias_maps_file: /etc/postfix/virtual_alias_maps
+
 # The following should be the same as Dovecot configuration files.
 # The full path to these resources is computed based on the value
 # of mailboxes_dir parameter.
