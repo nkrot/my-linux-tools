@@ -950,7 +950,7 @@ Send bugreports and suggestions for improvement to:
   end
 
   def message?
-    !@message.to_s.empty?
+    ! @message.to_s.strip.empty?
   end
 
   def message= str
