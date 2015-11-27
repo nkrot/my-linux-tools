@@ -1027,11 +1027,9 @@ Send bugreports and suggestions for improvement to:
       account_name => {
         "email"             => account_email,
         "activated"         => activated?,
-        "activation_time"   => activated_at   ?
-                                 activated_at.strftime(fmt)   : nil,
-        "deactivation_time" => deactivated_at ?
-                                 deactivated_at.strftime(fmt) : nil,
-        "message"           => message? ? message : nil
+        "activation_time"   => activated_at.strftime(fmt),
+        "deactivation_time" => deactivated_at.strftime(fmt),
+        "message"           => message
       }
     }
   end
