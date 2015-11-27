@@ -1261,11 +1261,21 @@ class EmailAnalyser
 
         end
 
-        # delete this message from the mailbox
-        # we dont want to process it next time the script is run
+        # Delete this message from the mailbox
+        # We dont want to process it next time the script is run
         unless Conf.keep_messages?
-          # vac.email_file.add_flag("T") # does not delete but merely marks as Trashed
+          # Setting T flag does not delete the message but merely marks
+          # it as Trashed. Trashed messages remain in the Maildir/cur.
+          # Email client does not show Trashed emails but this very script
+          # keeps seeing them and reacting to them.
+          #vac.email_file.add_flag("T")
+
+          # alternatively, real delete (expunge) from the file system
           vac.email_file.destroy
+
+          # TODO: better alternative would be to delete the message
+          # to the Trash folder. This could be useful for debugging
+          # purposes.
         end
       end
     end
@@ -1495,7 +1505,6 @@ OPTIONS:
           'This is useful primarily for testing.') do
     Conf.keep_messages = true
   end
-
 
   opts.on('--show-vacations-example', 'show example of vacations.yaml') do
     puts Vacation.example_entry_for_config.to_yaml
