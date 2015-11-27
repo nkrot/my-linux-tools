@@ -665,11 +665,20 @@ is an example of such a request email:
    last day: 14.01.2016
 
 Please note that the dates should be given on separate lines and the colon
-is obligatory.
+is obligatory. Synonymous for the above commands are:
+
+   first date, start date, start day,  erster Tag
+    last date,   end date,   end day, letzter Tag
+
+respectively. If you are familiar with regular expressions, this could be
+easier for you to read:
+
+   /(first|start|erster) (date|day|Tag):/i
+   /(last|end|letzter) (date|day|Tag):/i
 
 In addition, there is a possibility to specify a message that will be sent
 in the automatic reply. The message is introduced by the keyword 'message'
-followed by a colon and desired text.
+followed by a colon and a desired text snippet.
 
    message: I am on vacation.
 
@@ -689,7 +698,7 @@ Optionally, the instructions for the Autoresponder Service can be ended
 with the special keyword '=end'. The use of the end-keyword allows combining
 in a single email both the conventional email to human recipients and
 the instructions to the Autoresponder Service. For example, the following
-is a valid example:
+is a valid example (except labels **):
 
    Dear Colleagues,
 
@@ -709,6 +718,8 @@ is a valid example:
 In the above example, only the lines marked with ** will be used by
 the Autoresponder. Without =end keyword, the message will be the full
 chunk of text starting form message: and upto the end of the email.
+You are encouraged to use =end keyword to ensure the message is parsed
+correctly.
 
 By default the Autoresponder is activated at 18:00 on the day *before*
 the vacation starts as specified by 'first day' keyword. If the scheduled
@@ -716,10 +727,10 @@ day of activation happens to be Saturday or Sunday, it is shifted back
 further to Friday, 18:00.
 
 There is only one possibility to override the default activation time,
-namely by including 'activate: now' stanza. For example
+namely by including 'activate: now' stanza. For example:
 
-   first day: 20.12.2015
-   last day: 14.01.2016
+   first date: 20.12.2015
+   last date: 14.01.2016
    activate: now
    message: ....
 
@@ -775,8 +786,11 @@ TODO:
 - How to install the service
 - How emails are filtered to avoid unauthorized use
 - How it works with mailing lists - correctly ignores
-- How it works with group emails - not implemented yet, planned: should
-  respond to the sender (only).
+- How it works with group emails - recognizes the groups the account is in
+  and responds to the sender (only). Must be switched on in config file
+    autoreply_if_received_to_group_alias: true
+    virtual_alias_maps_file: /full/path/to/postfix/virtual_alias_maps
+  again, only addresses from the owned domains are selected
 
 ## BUG REPORTS
 
