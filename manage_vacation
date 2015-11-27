@@ -954,7 +954,7 @@ Send bugreports and suggestions for improvement to:
   end
 
   def message= str
-    @message = str.dup
+    @message = str.to_s.dup
   end
 
   def message
