@@ -868,9 +868,9 @@ Send bugreports and suggestions for improvement to:
         cancel
       elsif line =~ /^activate:\s*(now|jetzt)/i
         self.activated_at = Time.now - 1, freeze=true
-      elsif line =~ /^(?:first|start|erster) (?:day|date|tag):(.+)/i
+      elsif line =~ /^(?:first|start|erster)\s+(?:day|date|tag):(.+)/i
         self.starts_at = $1
-      elsif line =~ /^(?:last|end|letzter) (?:day|date|tag):(.+)/i
+      elsif line =~ /^(?:last|end|letzter)\s+(?:day|date|tag):(.+)/i
         self.ends_at = $1
       elsif line =~ /^message:(.*)/i
         @message = $1.strip
