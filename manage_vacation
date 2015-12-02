@@ -1,4 +1,5 @@
 #!/usr/bin/env ruby
+# -*- coding: utf-8; -*-
 
 # # #
 # > gem install maildir mail
@@ -963,7 +964,11 @@ Send bugreports and suggestions for improvement to:
   end
 
   def message_default
-    "I am on vacation from #{starts_at || '<NoDate>'} through #{ends_at || '<NoDate>'}."
+    msg_en = "Thank you for your email. I'm currently away from the office, returning on #{ends_at || '<DateOfReturn>'}. I will respond to your email(s) as soon as possible."
+    msg_de = "Vielen Dank für Ihre E-Mail. Ich bin ab dem #{ends_at || '<DateOfReturn>'} wieder per Mail erreichbar und werde mich dann baldmöglichst um Ihr Anliegen kümmern."
+#    msg_de = Vielen Dank für Ihre E-Mail. Ich bin derzeit nicht per Mail erreichbar und werde mich ab dem #{ends_at || '<DateOfReturn>'} um Ihr Anliegen kümmern."
+
+    [msg_en, msg_de].join("\n\n")
   end
 
   def parsing_message?
