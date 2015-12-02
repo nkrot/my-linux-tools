@@ -251,7 +251,12 @@ class Mailer
   class << self
 
     def send_mail other_params
-      params = { from: Conf.from_service }.merge(other_params)
+      params = {
+        from: Conf.from_service,
+        charset: 'UTF-8',
+        content_transfer_encoding: '8bit',
+      }.merge(other_params)
+
       mail = Mail.new params
       mail.deliver!
     end
