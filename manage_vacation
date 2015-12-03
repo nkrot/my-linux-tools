@@ -643,23 +643,28 @@ class Vacation
     outs << "
 ## SYNOPSYS
 
-The purpose of this service is to allow users to activate/deactivate Vacation
-Autoresponder for their own email account.
+The purpose of this service is to allow users to configure Vacation Autoresponder
+for their own email account. The Service takes care of activating and deactivating
+autoreplies at appropriate time, so that the users do not need to take care of
+it themselves.
 
-Interaction with the service is carried out by sending emails to the special
-address that is specified in the configuration file, typically:
+Interaction with the service is carried out by sending emails from the user's
+own email account to the special address that is specified in the configuration
+file, typically:
 
    #{service_email}
 
 The email should contain Autoresponder activation or deactivation instructions
 as described further in this document. If the email is not recognized as a valid
-request, this very HOWTO is sent in reply.
+request, this very HOWTO is sent in reply. The subject field of the email is
+never analysed, therefore it can be left empty.
 
 There is a delay between the time when the email arrives and when the email is
 processed, depending on how corresponding cron job is configured. Be patient.
 
-Plain text emails are preferred. Html emails were not tested. Configure your
-mailer to include plain text when sending to this account
+Plain text emails are preferred. HTML emails were not tested. Please, configure
+your email client to include plain text when sending messages to the Service
+account.
 
 ## HOW TO ACTIVATE AUTORESPONDER
 
