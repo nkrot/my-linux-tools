@@ -608,7 +608,12 @@ class VacationsFile
     if vac.is_a? Array
       vac.each{ |v| add v }
     elsif vac.is_a? Vacation
-      @data[vac.account_name] = vac
+      if vac.canceled? && @data[vac.account_name].is_a?(Vacation)
+        # cancel *existing* vacation
+        @data[vac.account_name].cancel
+      else
+        @data[vac.account_name] = vac
+      end
     end
   end
 
