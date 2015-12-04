@@ -825,7 +825,7 @@ Send bugreports and suggestions for improvement to:
     obj.account_email = "john.smith@example.com"
     obj.starts_at     = "13.1.2016"
     obj.ends_at       = "29.1.2016"
-    obj.message       = "Example: I am on vacation from #{obj.starts_at} till #{obj.ends_at}."
+    obj.message       = "Example: I am on vacation from #{obj.starts_at_as_dmY} till #{obj.ends_at_as_dmY}."
 
     obj.for_config
   end
