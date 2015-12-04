@@ -640,6 +640,10 @@ class Vacation
 
     outs = []
 
+    vac = self.new
+#    vac.starts_at = Date.today
+#    vac.ends_at   = Date.today.succ.succ.succ
+
     outs << "
 ## SYNOPSYS
 
@@ -704,7 +708,7 @@ The message text can span over various lines:
 
 If no message is specified, the default one will be sent:
 
-   #{self.new.message_default}
+   #{vac.message_default}
 
 Optionally, the instructions for the Autoresponder Service can be ended
 with the special keyword '=end'. The use of the end-keyword allows combining
@@ -836,6 +840,9 @@ Send bugreports and suggestions for improvement to:
     @errors           = []
     @frozen_variables = {}
 
+    # custom format for Date as string
+    @fmt_dmY = "%d.%m.%Y"
+
     if ! obj
       # skip
     elsif obj.is_a? String
@@ -942,6 +949,14 @@ Send bugreports and suggestions for improvement to:
     @ends_at
   end
 
+  def starts_at_as_dmY
+    starts_at.strftime(@fmt_dmY)  if starts_at
+  end
+
+  def ends_at_as_dmY
+    ends_at.strftime(@fmt_dmY)  if ends_at
+  end
+
   def activated_at= val
     if val.is_a? Array
       # handling case when the method was called as:
@@ -974,9 +989,13 @@ Send bugreports and suggestions for improvement to:
   end
 
   def message_default
-    msg_en = "Thank you for your email. I'm currently away from the office, returning on #{ends_at || '<DateOfReturn>'}. I will respond to your email(s) as soon as possible."
-    msg_de = "Vielen Dank für Ihre E-Mail. Ich bin ab dem #{ends_at || '<DateOfReturn>'} wieder per Mail erreichbar und werde mich dann baldmöglichst um Ihr Anliegen kümmern."
-#    msg_de = Vielen Dank für Ihre E-Mail. Ich bin derzeit nicht per Mail erreichbar und werde mich ab dem #{ends_at || '<DateOfReturn>'} um Ihr Anliegen kümmern."
+
+    last_day = ends_at_as_dmY || '<DateOfReturn>'
+    msg_en = "Thank you for your email. I'm currently away from the office, returning on #{last_day}. I will respond to your email(s) as soon as possible."
+
+    last_day = ends_at_as_dmY || '<RückkehrDatum>'
+    msg_de = "Vielen Dank für Ihre E-Mail. Ich bin ab dem #{last_day} wieder per Mail erreichbar und werde mich dann baldmöglichst um Ihr Anliegen kümmern."
+#    msg_de = Vielen Dank für Ihre E-Mail. Ich bin derzeit nicht per Mail erreichbar und werde mich ab dem #{last_day} um Ihr Anliegen kümmern."
 
     [msg_en, msg_de].join("\n\n")
   end
