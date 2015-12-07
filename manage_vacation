@@ -715,6 +715,10 @@ If no message is specified, the default one will be sent:
 
    #{vac.message_default}
 
+The Date of Return in the default message is computed as 'last day' specified
+by the user plus one day and if the computed date happens to be on weekend
+it is further shifted to upcoming Monday.
+
 Optionally, the instructions for the Autoresponder Service can be ended
 with the special keyword '=end'. The use of the end-keyword allows combining
 in a single email both the conventional email to human recipients and
